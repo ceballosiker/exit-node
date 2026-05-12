@@ -128,11 +128,8 @@ func decodeEnvelope(body []byte, into any) error {
 	return nil
 }
 
-// errNotImplemented is returned by the interface stubs below until
-// Tasks 8/9/10 replace them with real implementations. Stubs exist so
-// *pfClient satisfies PFSenseClient and New() can return the
-// interface as specified.
-var errNotImplemented = errors.New("pfsense: not implemented")
+// Compile-time assertion that *pfClient implements PFSenseClient.
+var _ PFSenseClient = (*pfClient)(nil)
 
 // GetGateway returns the named gateway. Translates 404 envelopes to
 // *APIError so callers can distinguish "not found" from "transport
@@ -171,9 +168,14 @@ func (c *pfClient) UpdateGatewayIP(ctx context.Context, name, ip string) error {
 	return decodeEnvelope(respBody, new(any))
 }
 
-// Apply is a stub; Task 10 lands the real impl.
+// Apply reloads the routing configuration so pending changes (e.g.,
+// from UpdateGatewayIP) become live.
 func (c *pfClient) Apply(ctx context.Context) error {
-	return errNotImplemented
+	respBody, _, err := c.do(ctx, http.MethodPost, "/api/v2/routing/apply", nil)
+	if err != nil {
+		return fmt.Errorf("pfsense POST apply: %w", err)
+	}
+	return decodeEnvelope(respBody, new(any))
 }
 
 // do issues an HTTP request, applies auth + JSON headers, returns the

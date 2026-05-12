@@ -157,6 +157,34 @@ func TestUpdateGatewayIP_ValidationError(t *testing.T) {
 	}
 }
 
+func TestApply_Success(t *testing.T) {
+	var gotMethod, gotPath string
+	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"code":200,"status":"ok","response_id":"SUCCESS","message":"applied","data":null}`))
+	})
+	if err := c.Apply(context.Background()); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if gotMethod != "POST" {
+		t.Errorf("method = %s", gotMethod)
+	}
+	if gotPath != "/api/v2/routing/apply" {
+		t.Errorf("path = %s", gotPath)
+	}
+}
+
+func TestApply_ServerError(t *testing.T) {
+	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"code":500,"status":"error","response_id":"INTERNAL","message":"oops","data":null}`))
+	})
+	if err := c.Apply(context.Background()); err == nil {
+		t.Errorf("expected error")
+	}
+}
+
 // io is used here; ensure it's imported.
 var _ = io.ReadAll
 
