@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -101,5 +102,33 @@ func TestClearActive(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("expected nil after Clear, got %+v", got)
+	}
+}
+
+func TestFlockContention(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	first, err := Open(path)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	defer first.Close()
+
+	_, err = Open(path)
+	if !errors.Is(err, ErrLocked) {
+		t.Fatalf("second Open: got err=%v, want ErrLocked", err)
+	}
+
+	// After releasing the first, a second Open succeeds.
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first: %v", err)
+	}
+	second, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open after release: %v", err)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatalf("close second: %v", err)
 	}
 }
