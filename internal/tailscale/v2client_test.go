@@ -3,10 +3,8 @@ package tailscale
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -65,12 +63,6 @@ func TestNewRequiresCredentials(t *testing.T) {
 		})
 	}
 }
-
-// Silence "imported and not used" for early tasks; later tasks use these.
-var (
-	_ = errors.New
-	_ = url.Parse
-)
 
 func TestMintEphemeralAuthKey_Success(t *testing.T) {
 	var gotMethod, gotPath, gotAuth string
@@ -192,9 +184,6 @@ func TestWaitForDevice_Timeout(t *testing.T) {
 	}
 }
 
-// atomic import marker.
-var _ = atomic.LoadInt32
-
 func TestAuthorizeExitNode_CallsBothEndpoints(t *testing.T) {
 	var setAuthorizedCalled, setRoutesCalled bool
 	var routesBody map[string]any
@@ -228,5 +217,42 @@ func TestAuthorizeExitNode_CallsBothEndpoints(t *testing.T) {
 	routes, _ := routesBody["routes"].([]any)
 	if len(routes) != 2 {
 		t.Errorf("routes = %v", routes)
+	}
+}
+
+func TestSetTags_Success(t *testing.T) {
+	var got map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v2/device/node-1/tags",
+		func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewDecoder(r.Body).Decode(&got)
+			w.WriteHeader(http.StatusOK)
+		})
+	_, c := newTestClient(t, mux)
+	if err := c.SetTags(context.Background(), "node-1", []string{"tag:exit-node", "tag:home"}); err != nil {
+		t.Fatalf("SetTags: %v", err)
+	}
+	tags, _ := got["tags"].([]any)
+	if len(tags) != 2 {
+		t.Errorf("tags = %v", tags)
+	}
+}
+
+func TestDeleteDevice_Success(t *testing.T) {
+	var deleted bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v2/device/node-1",
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodDelete {
+				deleted = true
+				w.WriteHeader(http.StatusOK)
+			}
+		})
+	_, c := newTestClient(t, mux)
+	if err := c.DeleteDevice(context.Background(), "node-1"); err != nil {
+		t.Fatalf("DeleteDevice: %v", err)
+	}
+	if !deleted {
+		t.Errorf("expected DELETE /api/v2/device/node-1")
 	}
 }

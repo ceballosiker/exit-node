@@ -15,10 +15,6 @@ import (
 	tsv2 "tailscale.com/client/tailscale/v2"
 )
 
-// errNotImplemented is returned by stub methods on tsClient until the
-// corresponding task (12-15) supplies the real implementation.
-var errNotImplemented = errors.New("tailscale: not implemented")
-
 // Options configures the Tailscale client.
 type Options struct {
 	// Tailnet is the organization name (the part before .ts.net or
@@ -171,14 +167,20 @@ func (c *tsClient) AuthorizeExitNode(ctx context.Context, deviceID string) error
 	return nil
 }
 
-// SetTags — Task 15 will implement.
+// SetTags replaces the device's tag set.
 func (c *tsClient) SetTags(ctx context.Context, deviceID string, tags []string) error {
-	return errNotImplemented
+	if err := c.inner.Devices().SetTags(ctx, deviceID, tags); err != nil {
+		return fmt.Errorf("tailscale set tags: %w", err)
+	}
+	return nil
 }
 
-// DeleteDevice — Task 15 will implement.
+// DeleteDevice removes the device from the tailnet.
 func (c *tsClient) DeleteDevice(ctx context.Context, deviceID string) error {
-	return errNotImplemented
+	if err := c.inner.Devices().Delete(ctx, deviceID); err != nil {
+		return fmt.Errorf("tailscale delete device: %w", err)
+	}
+	return nil
 }
 
 // Compile-time assertion.
