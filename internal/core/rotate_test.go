@@ -210,6 +210,104 @@ func hasCallWithArg(calls []callRecord, name string, arg any) bool {
 // Sentinel to prevent "imported and not used" if errors becomes unused later.
 var _ = errors.New
 
+func TestRotate_PrePFSenseFailureCases(t *testing.T) {
+	tests := []struct {
+		name           string
+		mutate         func(*rotateFixture)
+		wantErrSubstr  string
+		wantDestroyNew bool // true if we expect Destroy(newNode.Name)
+		wantDelDevice  bool // true if we expect DeleteDevice(newDev.ID)
+	}{
+		{
+			name:           "mint auth key fails",
+			mutate:         func(f *rotateFixture) { f.ts.MintErr = errors.New("boom mint") },
+			wantErrSubstr:  "mint ephemeral auth key",
+			wantDestroyNew: false, // no VM created yet
+			wantDelDevice:  false,
+		},
+		{
+			name:           "provision fails",
+			mutate:         func(f *rotateFixture) { f.prov.ProvisionErr = errors.New("boom provision") },
+			wantErrSubstr:  "provision new node",
+			wantDestroyNew: false,
+			wantDelDevice:  false,
+		},
+		{
+			name:           "register timeout",
+			mutate:         func(f *rotateFixture) { f.ts.WaitErr = errors.New("timeout") },
+			wantErrSubstr:  "wait for device",
+			wantDestroyNew: true,
+			wantDelDevice:  false, // device never registered
+		},
+		{
+			name:           "authorize fails",
+			mutate:         func(f *rotateFixture) { f.ts.AuthorizeErr = errors.New("nope") },
+			wantErrSubstr:  "authorize exit node",
+			wantDestroyNew: true,
+			wantDelDevice:  true,
+		},
+		{
+			name:           "set tags fails",
+			mutate:         func(f *rotateFixture) { f.ts.SetTagsErr = errors.New("tag fail") },
+			wantErrSubstr:  "set tags",
+			wantDestroyNew: true,
+			wantDelDevice:  true,
+		},
+		{
+			name:           "probe error",
+			mutate:         func(f *rotateFixture) { f.probe.EgressViaErr = errors.New("probe fail") },
+			wantErrSubstr:  "pre-cutover probe",
+			wantDestroyNew: true,
+			wantDelDevice:  true,
+		},
+		{
+			name:           "probe egress IP mismatch",
+			mutate:         func(f *rotateFixture) { f.probe.EgressViaResult = "1.2.3.4" /* != newNode.PublicIP */ },
+			wantErrSubstr:  "egress IP mismatch",
+			wantDestroyNew: true,
+			wantDelDevice:  true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRotateFixture(t)
+			f.cfg.Behavior.AutoSyncPFSense = false
+			tc.mutate(f)
+
+			_, err := f.core.Rotate(context.Background(), RotateOpts{Region: "asia-southeast1"})
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !contains(err.Error(), tc.wantErrSubstr) {
+				t.Errorf("err = %q, want substring %q", err.Error(), tc.wantErrSubstr)
+			}
+
+			gotDestroyNew := hasCallWithArg(f.prov.calls, "Destroy", f.newNode.Name)
+			gotDelDev := hasCallWithArg(f.ts.calls, "DeleteDevice", f.newDev.ID)
+			if gotDestroyNew != tc.wantDestroyNew {
+				t.Errorf("Destroy(new) = %v, want %v (calls=%v)", gotDestroyNew, tc.wantDestroyNew, f.prov.calls)
+			}
+			if gotDelDev != tc.wantDelDevice {
+				t.Errorf("DeleteDevice(new) = %v, want %v (calls=%v)", gotDelDev, tc.wantDelDevice, f.ts.calls)
+			}
+
+			// Old node MUST NOT be destroyed in any pre-pfSense failure.
+			if hasCallWithArg(f.prov.calls, "Destroy", f.oldNode.Name) {
+				t.Errorf("old node was destroyed on failure; calls=%v", f.prov.calls)
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRotateHappyPath_WithPFSense(t *testing.T) {
 	f := newRotateFixture(t)
 	f.cfg.Behavior.AutoSyncPFSense = true
