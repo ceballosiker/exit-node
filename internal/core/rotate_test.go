@@ -419,6 +419,37 @@ func TestRotate_CriticalCase_ApplyAndRevertBothFail(t *testing.T) {
 	}
 }
 
+func TestRotate_PostCutoverProbeFails_RevertsAndDestroys(t *testing.T) {
+	f := newRotateFixture(t)
+	f.cfg.Behavior.AutoSyncPFSense = true
+	f.cfg.Behavior.VerifyPostCutover = true
+
+	// Pre-cutover probe succeeds (returns matching IP).
+	// Post-cutover probe (EgressDirect) returns wrong IP.
+	f.probe.EgressDirectResult = "1.1.1.1"
+
+	_, err := f.core.Rotate(context.Background(), RotateOpts{Region: "asia-southeast1"})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !contains(err.Error(), "post-cutover probe") {
+		t.Errorf("err = %q, want post-cutover probe", err.Error())
+	}
+
+	// Gateway must be reverted.
+	if got := f.pf.Gateways["GW"]; got != "100.64.0.1" {
+		t.Errorf("gateway = %s, want 100.64.0.1", got)
+	}
+	// New node destroyed.
+	if !hasCallWithArg(f.prov.calls, "Destroy", f.newNode.Name) {
+		t.Errorf("expected Destroy(new); calls=%v", f.prov.calls)
+	}
+	// Old node NOT destroyed.
+	if hasCallWithArg(f.prov.calls, "Destroy", f.oldNode.Name) {
+		t.Errorf("old node was destroyed; calls=%v", f.prov.calls)
+	}
+}
+
 func TestRotateHappyPath_WithPFSense(t *testing.T) {
 	f := newRotateFixture(t)
 	f.cfg.Behavior.AutoSyncPFSense = true
