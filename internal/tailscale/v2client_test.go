@@ -194,3 +194,39 @@ func TestWaitForDevice_Timeout(t *testing.T) {
 
 // atomic import marker.
 var _ = atomic.LoadInt32
+
+func TestAuthorizeExitNode_CallsBothEndpoints(t *testing.T) {
+	var setAuthorizedCalled, setRoutesCalled bool
+	var routesBody map[string]any
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v2/device/node-1/authorized",
+		func(w http.ResponseWriter, r *http.Request) {
+			setAuthorizedCalled = true
+			w.WriteHeader(http.StatusOK)
+		})
+	mux.HandleFunc("/api/v2/device/node-1/routes",
+		func(w http.ResponseWriter, r *http.Request) {
+			setRoutesCalled = true
+			_ = json.NewDecoder(r.Body).Decode(&routesBody)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"enabledRoutes":    []string{"0.0.0.0/0", "::/0"},
+				"advertisedRoutes": []string{"0.0.0.0/0", "::/0"},
+			})
+		})
+
+	_, c := newTestClient(t, mux)
+	if err := c.AuthorizeExitNode(context.Background(), "node-1"); err != nil {
+		t.Fatalf("AuthorizeExitNode: %v", err)
+	}
+	if !setAuthorizedCalled {
+		t.Errorf("expected /authorized to be called")
+	}
+	if !setRoutesCalled {
+		t.Errorf("expected /routes to be called")
+	}
+	routes, _ := routesBody["routes"].([]any)
+	if len(routes) != 2 {
+		t.Errorf("routes = %v", routes)
+	}
+}

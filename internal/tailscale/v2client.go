@@ -155,9 +155,20 @@ func toDevice(d tsv2.Device) *Device {
 	return out
 }
 
-// AuthorizeExitNode — Task 14 will implement.
+// AuthorizeExitNode performs two underlying operations:
+//  1. SetAuthorized(true) — only meaningful if the tailnet requires
+//     manual device approval. With preauth keys this is typically a
+//     no-op (already authorized), but calling it is idempotent.
+//  2. SetSubnetRoutes(["0.0.0.0/0", "::/0"]) — enables the exit-node
+//     advertisement.
 func (c *tsClient) AuthorizeExitNode(ctx context.Context, deviceID string) error {
-	return errNotImplemented
+	if err := c.inner.Devices().SetAuthorized(ctx, deviceID, true); err != nil {
+		return fmt.Errorf("tailscale set authorized: %w", err)
+	}
+	if err := c.inner.Devices().SetSubnetRoutes(ctx, deviceID, []string{"0.0.0.0/0", "::/0"}); err != nil {
+		return fmt.Errorf("tailscale set subnet routes: %w", err)
+	}
+	return nil
 }
 
 // SetTags — Task 15 will implement.
