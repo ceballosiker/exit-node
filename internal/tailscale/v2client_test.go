@@ -69,7 +69,74 @@ func TestNewRequiresCredentials(t *testing.T) {
 var (
 	_ = errors.New
 	_ = url.Parse
-	_ = strings.TrimSpace
 	_ = time.Now
-	_ = context.Background
 )
+
+func TestMintEphemeralAuthKey_Success(t *testing.T) {
+	var gotMethod, gotPath, gotAuth string
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v2/tailnet/test.example.com/keys",
+		func(w http.ResponseWriter, r *http.Request) {
+			gotMethod = r.Method
+			gotPath = r.URL.Path
+			gotAuth = r.Header.Get("Authorization")
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":  "key-id-1",
+				"key": "tskey-auth-xxxxxx",
+			})
+		})
+
+	_, c := newTestClient(t, mux)
+	got, err := c.MintEphemeralAuthKey(context.Background(), []string{"tag:exit-node"})
+	if err != nil {
+		t.Fatalf("MintEphemeralAuthKey: %v", err)
+	}
+	if got != "tskey-auth-xxxxxx" {
+		t.Errorf("key = %q", got)
+	}
+	if gotMethod != "POST" {
+		t.Errorf("method = %s", gotMethod)
+	}
+	if gotPath != "/api/v2/tailnet/test.example.com/keys" {
+		t.Errorf("path = %s", gotPath)
+	}
+	if !strings.HasPrefix(gotAuth, "Bearer ") {
+		t.Errorf("auth header = %q, want Bearer prefix", gotAuth)
+	}
+
+	// Body shape — drill into capabilities.devices.create:
+	caps, _ := gotBody["capabilities"].(map[string]any)
+	devs, _ := caps["devices"].(map[string]any)
+	create, _ := devs["create"].(map[string]any)
+	if v, _ := create["ephemeral"].(bool); !v {
+		t.Errorf("ephemeral != true (body=%v)", gotBody)
+	}
+	if v, _ := create["preauthorized"].(bool); !v {
+		t.Errorf("preauthorized != true")
+	}
+	if v, _ := create["reusable"].(bool); v {
+		t.Errorf("reusable should be false")
+	}
+	tags, _ := create["tags"].([]any)
+	if len(tags) != 1 || tags[0] != "tag:exit-node" {
+		t.Errorf("tags = %v", tags)
+	}
+	if exp, _ := gotBody["expirySeconds"].(float64); exp != 300 {
+		t.Errorf("expirySeconds = %v, want 300", exp)
+	}
+}
+
+func TestMintEphemeralAuthKey_APIError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v2/tailnet/test.example.com/keys",
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"message":"bad scope"}`))
+		})
+	_, c := newTestClient(t, mux)
+	if _, err := c.MintEphemeralAuthKey(context.Background(), nil); err == nil {
+		t.Errorf("expected error")
+	}
+}

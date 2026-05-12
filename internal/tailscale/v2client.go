@@ -78,9 +78,26 @@ func New(opts Options) (TailscaleClient, error) {
 	return &tsClient{inner: c, tailnet: opts.Tailnet, pollInterval: poll}, nil
 }
 
-// MintEphemeralAuthKey — Task 12 will implement.
+// MintEphemeralAuthKey mints a single-use, ephemeral, preauthorized
+// auth key tagged for the given tags. The key has a 5-minute TTL.
 func (c *tsClient) MintEphemeralAuthKey(ctx context.Context, tags []string) (string, error) {
-	return "", errNotImplemented
+	req := tsv2.CreateKeyRequest{
+		Description:   "exit-node bootstrap",
+		ExpirySeconds: 300,
+	}
+	// The Capabilities shape uses anonymous nested structs in the v2
+	// library. The construction below mirrors the library's struct
+	// literal pattern; field names match those in CreateKeyRequest.
+	req.Capabilities.Devices.Create.Reusable = false
+	req.Capabilities.Devices.Create.Ephemeral = true
+	req.Capabilities.Devices.Create.Preauthorized = true
+	req.Capabilities.Devices.Create.Tags = tags
+
+	key, err := c.inner.Keys().CreateAuthKey(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("tailscale create auth key: %w", err)
+	}
+	return key.Key, nil
 }
 
 // WaitForDevice — Task 13 will implement.
