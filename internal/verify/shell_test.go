@@ -198,3 +198,12 @@ func equalSlices(a, b []string) bool {
 	}
 	return true
 }
+
+func TestNewReturnsProbe(t *testing.T) {
+	var _ Probe = (*shellProbe)(nil) // compile-time interface check
+
+	p := New("https://example.com/ip")
+	if p == nil {
+		t.Fatalf("New returned nil")
+	}
+}

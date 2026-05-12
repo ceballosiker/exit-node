@@ -40,11 +40,8 @@ func (osCmdRunner) Run(ctx context.Context, name string, args ...string) (string
 	return stdout.String(), nil
 }
 
-// New constructs the production Probe. The return type is *shellProbe in
-// this task because EgressDirect (required by the Probe interface) is
-// added in Task 5; Task 6 will widen this to Probe alongside the
-// compile-time interface sentinel.
-func New(probeURL string) *shellProbe {
+// New constructs the production Probe (shells out to tailscale + curl).
+func New(probeURL string) Probe {
 	return &shellProbe{run: osCmdRunner{}, probeURL: probeURL}
 }
 
