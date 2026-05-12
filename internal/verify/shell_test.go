@@ -52,3 +52,44 @@ func TestShellRunnerInterface(t *testing.T) {
 	// implements it. Compile-only assertion.
 	var _ commandRunner = (*fakeRunner)(nil)
 }
+
+func TestEgressVia_HappyPath_RestoresPrior(t *testing.T) {
+	statusJSON := `{"ExitNodeStatus":{"ID":"prior-node-id"}}`
+	fake := &fakeRunner{
+		Responses: []fakeResponse{
+			{Stdout: statusJSON, Err: nil},             // tailscale status --json
+			{Stdout: "", Err: nil},                     // tailscale set --exit-node=<new>
+			{Stdout: "pong\n", Err: nil},               // tailscale ping
+			{Stdout: "203.0.113.7\n", Err: nil},        // curl
+			{Stdout: "", Err: nil},                     // tailscale set --exit-node=prior-node-id (defer)
+		},
+	}
+	p := &shellProbe{run: fake, probeURL: "https://example.com/ip"}
+
+	got, err := p.EgressVia(context.Background(), "100.64.0.9")
+	if err != nil {
+		t.Fatalf("EgressVia: %v", err)
+	}
+	if got != "203.0.113.7" {
+		t.Errorf("egress = %q, want 203.0.113.7", got)
+	}
+
+	if len(fake.calls) != 5 {
+		t.Fatalf("expected 5 commands, got %d: %v", len(fake.calls), fake.lastNCommands(len(fake.calls)))
+	}
+	// The fifth call must be the restore to the prior ID.
+	got5 := fake.calls[4]
+	if got5.Name != "tailscale" || !contains(got5.Args, "--exit-node=prior-node-id") {
+		t.Errorf("expected restore to prior id, got %s %v", got5.Name, got5.Args)
+	}
+}
+
+// contains reports whether needle is in haystack.
+func contains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
