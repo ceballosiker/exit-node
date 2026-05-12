@@ -5,9 +5,9 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -111,9 +111,56 @@ func TestGetGateway_NotFound(t *testing.T) {
 	}
 }
 
+func TestUpdateGatewayIP_Success(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		_, _ = w.Write([]byte(`{"code":200,"status":"ok","response_id":"SUCCESS","message":"","data":{}}`))
+	})
+	if err := c.UpdateGatewayIP(context.Background(), "GW", "100.64.0.99"); err != nil {
+		t.Fatalf("UpdateGatewayIP: %v", err)
+	}
+	if gotMethod != "PATCH" {
+		t.Errorf("method = %s", gotMethod)
+	}
+	if gotPath != "/api/v2/routing/gateway" {
+		t.Errorf("path = %s", gotPath)
+	}
+	// Body shape: {"id":"GW","gateway":"100.64.0.99"}
+	var parsed struct {
+		ID      string `json:"id"`
+		Gateway string `json:"gateway"`
+	}
+	if err := json.Unmarshal([]byte(gotBody), &parsed); err != nil {
+		t.Fatalf("body json: %v", err)
+	}
+	if parsed.ID != "GW" || parsed.Gateway != "100.64.0.99" {
+		t.Errorf("body = %+v", parsed)
+	}
+}
+
+func TestUpdateGatewayIP_ValidationError(t *testing.T) {
+	_, c := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code":400,"status":"error","response_id":"VALIDATION_FAILED","message":"bad ip","data":null}`))
+	})
+	err := c.UpdateGatewayIP(context.Background(), "GW", "not-an-ip")
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.ResponseID != "VALIDATION_FAILED" {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// io is used here; ensure it's imported.
+var _ = io.ReadAll
+
 // Silence unused-import warnings in early tasks; they're used by later tests.
 var (
-	_ = json.Marshal
 	_ = tls.Config{}
-	_ = strings.NewReader
 )

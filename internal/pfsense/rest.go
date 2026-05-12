@@ -153,9 +153,22 @@ func (c *pfClient) GetGateway(ctx context.Context, name string) (*Gateway, error
 	return &Gateway{Name: raw.Name, IP: raw.Gateway}, nil
 }
 
-// UpdateGatewayIP is a stub; Task 9 lands the real impl.
+// UpdateGatewayIP changes the configured IP of the named gateway. The
+// pfSense API requires a follow-up Apply call to make the change live.
 func (c *pfClient) UpdateGatewayIP(ctx context.Context, name, ip string) error {
-	return errNotImplemented
+	body, err := json.Marshal(struct {
+		ID      string `json:"id"`
+		Gateway string `json:"gateway"`
+	}{ID: name, Gateway: ip})
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	respBody, _, err := c.do(ctx, http.MethodPatch, "/api/v2/routing/gateway",
+		strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("pfsense PATCH gateway: %w", err)
+	}
+	return decodeEnvelope(respBody, new(any))
 }
 
 // Apply is a stub; Task 10 lands the real impl.
