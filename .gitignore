@@ -30,3 +30,9 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Superpowers working artifacts (specs, plans, review notes) — never committed
+docs/superpowers/
+
+# Local Claude project guidance — never committed
+CLAUDE.md
