@@ -209,3 +209,24 @@ func hasCallWithArg(calls []callRecord, name string, arg any) bool {
 
 // Sentinel to prevent "imported and not used" if errors becomes unused later.
 var _ = errors.New
+
+func TestRotateHappyPath_WithPFSense(t *testing.T) {
+	f := newRotateFixture(t)
+	f.cfg.Behavior.AutoSyncPFSense = true
+
+	res, err := f.core.Rotate(context.Background(), RotateOpts{Region: "asia-southeast1"})
+	if err != nil {
+		t.Fatalf("Rotate err = %v", err)
+	}
+	if res.New == nil || res.New.Name != f.newNode.Name {
+		t.Errorf("res.New = %v", res.New)
+	}
+
+	wantPFCalls := []string{"GetGateway", "UpdateGatewayIP", "Apply"}
+	if !reflect.DeepEqual(f.pf.names(), wantPFCalls) {
+		t.Errorf("pfSense calls = %v, want %v", f.pf.names(), wantPFCalls)
+	}
+	if got := f.pf.Gateways["GW"]; got != f.newDev.TailscaleIP {
+		t.Errorf("gateway IP = %s, want %s", got, f.newDev.TailscaleIP)
+	}
+}

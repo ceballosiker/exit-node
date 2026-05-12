@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/iker/exit-node/internal/gcp"
+	"github.com/iker/exit-node/internal/pfsense"
 	"github.com/iker/exit-node/internal/tailscale"
 )
 
@@ -117,7 +118,59 @@ func (c *Core) Rotate(ctx context.Context, opts RotateOpts) (*RotateResult, erro
 		}
 	}
 
-	// (pfSense branch added in Task 10)
+	// Snapshot the current pfSense gateway for revert.
+	var oldGw *pfsense.Gateway
+	if c.cfg.Behavior.AutoSyncPFSense {
+		oldGw, err = c.pf.GetGateway(ctx, c.cfg.PFSense.GatewayName)
+		if err != nil {
+			cleanup(fmt.Errorf("snapshot pfSense gateway: %w", err))
+			return nil, fmt.Errorf("snapshot pfsense gateway: %w", err)
+		}
+
+		// 8. POINT OF NO RETURN: update + apply.
+		if err := c.pf.UpdateGatewayIP(ctx, c.cfg.PFSense.GatewayName, newDevice.TailscaleIP); err != nil {
+			// UpdateGatewayIP failed before any Apply — live config unchanged.
+			// Defensive: still try a revert call in case the impl staged partial config.
+			rctx, rcancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer rcancel()
+			_ = c.pf.UpdateGatewayIP(rctx, c.cfg.PFSense.GatewayName, oldGw.IP)
+			cleanup(fmt.Errorf("pfsense update gateway failed: %w", err))
+			return nil, fmt.Errorf("update pfsense gateway: %w", err)
+		}
+		if err := c.pf.Apply(ctx); err != nil {
+			// Apply failed: a stale stage might still exist. Revert.
+			rctx, rcancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer rcancel()
+			revertErr := c.pf.UpdateGatewayIP(rctx, c.cfg.PFSense.GatewayName, oldGw.IP)
+			if revertErr == nil {
+				revertErr = c.pf.Apply(rctx)
+			}
+			if revertErr != nil {
+				return nil, &CriticalError{
+					Message:     "pfsense apply failed AND revert failed",
+					PrimaryErr:  err,
+					RevertErr:   revertErr,
+					NewNodeName: newNode.Name,
+					NewDeviceID: newDevice.ID,
+				}
+			}
+			cleanup(fmt.Errorf("pfsense apply failed (reverted): %w", err))
+			return nil, fmt.Errorf("apply pfsense changes: %w", err)
+		}
+
+		// 9. (Optional) post-cutover probe.
+		if c.cfg.Behavior.VerifyPostCutover {
+			egress, perr := c.probe.EgressDirect(ctx)
+			if perr != nil || egress != newNode.PublicIP {
+				rctx, rcancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer rcancel()
+				_ = c.pf.UpdateGatewayIP(rctx, c.cfg.PFSense.GatewayName, oldGw.IP)
+				_ = c.pf.Apply(rctx)
+				cleanup(fmt.Errorf("post-cutover probe failed: egress=%s err=%v", egress, perr))
+				return nil, fmt.Errorf("post-cutover probe: got %s, want %s (err=%v)", egress, newNode.PublicIP, perr)
+			}
+		}
+	}
 
 	// Tear down old node (best-effort).
 	if old != nil {
