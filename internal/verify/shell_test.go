@@ -93,3 +93,69 @@ func contains(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+func TestEgressVia_RestoreRunsOnFailure(t *testing.T) {
+	statusJSON := `{"ExitNodeStatus":{"ID":"prior-node-id"}}`
+
+	cases := []struct {
+		name string
+		// Responses: status, set, ping, curl — index of which one to fail.
+		failAt        int
+		wantErrSubstr string
+	}{
+		{name: "set fails", failAt: 1, wantErrSubstr: "set exit-node"},
+		{name: "ping fails", failAt: 2, wantErrSubstr: "tailscale ping"},
+		{name: "curl fails", failAt: 3, wantErrSubstr: "curl probe URL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			responses := []fakeResponse{
+				{Stdout: statusJSON, Err: nil},  // status
+				{Stdout: "", Err: nil},          // set
+				{Stdout: "pong\n", Err: nil},    // ping
+				{Stdout: "1.2.3.4\n", Err: nil}, // curl
+			}
+			responses[tc.failAt] = fakeResponse{Err: errors.New("boom")}
+			// Always one extra response for the restore.
+			responses = append(responses, fakeResponse{})
+
+			fake := &fakeRunner{Responses: responses}
+			p := &shellProbe{run: fake, probeURL: "https://x/ip"}
+
+			_, err := p.EgressVia(context.Background(), "100.64.0.9")
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+				t.Errorf("err = %q, want substring %q", err.Error(), tc.wantErrSubstr)
+			}
+
+			// The LAST call must be the restore.
+			last := fake.calls[len(fake.calls)-1]
+			if last.Name != "tailscale" || !contains(last.Args, "--exit-node=prior-node-id") {
+				t.Errorf("expected last call to be restore; got %s %v", last.Name, last.Args)
+			}
+		})
+	}
+}
+
+func TestEgressVia_RestoresEmptyWhenNoPriorExitNode(t *testing.T) {
+	// ExitNodeStatus absent in JSON → restore arg is bare "--exit-node="
+	fake := &fakeRunner{
+		Responses: []fakeResponse{
+			{Stdout: `{}`, Err: nil},        // status: no ExitNodeStatus
+			{Stdout: "", Err: nil},          // set
+			{Stdout: "pong\n", Err: nil},    // ping
+			{Stdout: "1.2.3.4\n", Err: nil}, // curl
+			{Stdout: "", Err: nil},          // restore
+		},
+	}
+	p := &shellProbe{run: fake, probeURL: "https://x/ip"}
+	if _, err := p.EgressVia(context.Background(), "100.64.0.9"); err != nil {
+		t.Fatalf("EgressVia: %v", err)
+	}
+	last := fake.calls[len(fake.calls)-1]
+	if last.Name != "tailscale" || !contains(last.Args, "--exit-node=") {
+		t.Errorf("expected restore with empty exit-node, got %s %v", last.Name, last.Args)
+	}
+}
