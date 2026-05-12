@@ -100,9 +100,59 @@ func (c *tsClient) MintEphemeralAuthKey(ctx context.Context, tags []string) (str
 	return key.Key, nil
 }
 
-// WaitForDevice — Task 13 will implement.
+// WaitForDevice polls the devices list until a device whose Hostname
+// matches the given value appears, or until the timeout elapses.
+//
+// The v2 library's Device.Name is the FQDN (hostname plus tailnet
+// suffix); some control-plane responses populate Name but not
+// Hostname, so we accept either when matching.
 func (c *tsClient) WaitForDevice(ctx context.Context, hostname string, timeout time.Duration) (*Device, error) {
-	return nil, errNotImplemented
+	deadline := time.Now().Add(timeout)
+	for {
+		devs, err := c.inner.Devices().List(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("tailscale list devices: %w", err)
+		}
+		for _, d := range devs {
+			if d.Hostname == hostname {
+				return toDevice(d), nil
+			}
+			// Some v2 responses populate Name (FQDN) instead of
+			// Hostname; tolerate either.
+			if strings.HasPrefix(d.Name, hostname+".") {
+				return toDevice(d), nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("tailscale: device %q did not register within %s", hostname, timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(c.pollInterval):
+		}
+	}
+}
+
+// toDevice converts a v2 library Device to our internal Device type.
+//
+// The v2 library has no Online field; ConnectedToControl is the
+// closest equivalent (true when the device currently holds an active
+// control-plane connection).
+func toDevice(d tsv2.Device) *Device {
+	out := &Device{
+		ID:       d.NodeID,
+		Hostname: d.Hostname,
+		Online:   d.ConnectedToControl,
+		Tags:     append([]string(nil), d.Tags...),
+	}
+	if out.ID == "" {
+		out.ID = d.ID
+	}
+	if len(d.Addresses) > 0 {
+		out.TailscaleIP = d.Addresses[0]
+	}
+	return out
 }
 
 // AuthorizeExitNode — Task 14 will implement.

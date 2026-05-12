@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -69,7 +70,6 @@ func TestNewRequiresCredentials(t *testing.T) {
 var (
 	_ = errors.New
 	_ = url.Parse
-	_ = time.Now
 )
 
 func TestMintEphemeralAuthKey_Success(t *testing.T) {
@@ -140,3 +140,57 @@ func TestMintEphemeralAuthKey_APIError(t *testing.T) {
 		t.Errorf("expected error")
 	}
 }
+
+func TestWaitForDevice_FindsAfterDelay(t *testing.T) {
+	var listCalls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v2/tailnet/test.example.com/devices",
+		func(w http.ResponseWriter, r *http.Request) {
+			n := atomic.AddInt32(&listCalls, 1)
+			devices := []map[string]any{}
+			if n >= 2 { // appear on second poll
+				devices = []map[string]any{{
+					"nodeId":    "node-1",
+					"id":        "id-1",
+					"name":      "vpn-us-west1-abc.test.example.com",
+					"hostname":  "vpn-us-west1-abc",
+					"addresses": []string{"100.64.0.9"},
+				}}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"devices": devices})
+		})
+	_, c := newTestClient(t, mux)
+	c.pollInterval = 10 * time.Millisecond // fast poll for tests
+
+	dev, err := c.WaitForDevice(context.Background(), "vpn-us-west1-abc", 2*time.Second)
+	if err != nil {
+		t.Fatalf("WaitForDevice: %v", err)
+	}
+	if dev == nil || dev.Hostname != "vpn-us-west1-abc" {
+		t.Errorf("dev = %+v", dev)
+	}
+	if dev.TailscaleIP != "100.64.0.9" {
+		t.Errorf("TailscaleIP = %q", dev.TailscaleIP)
+	}
+	if atomic.LoadInt32(&listCalls) < 2 {
+		t.Errorf("expected >=2 list calls, got %d", listCalls)
+	}
+}
+
+func TestWaitForDevice_Timeout(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v2/tailnet/test.example.com/devices",
+		func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"devices": []any{}})
+		})
+	_, c := newTestClient(t, mux)
+	c.pollInterval = 5 * time.Millisecond
+
+	_, err := c.WaitForDevice(context.Background(), "missing", 50*time.Millisecond)
+	if err == nil {
+		t.Errorf("expected timeout error")
+	}
+}
+
+// atomic import marker.
+var _ = atomic.LoadInt32
