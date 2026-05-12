@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -133,9 +134,23 @@ func decodeEnvelope(body []byte, into any) error {
 // interface as specified.
 var errNotImplemented = errors.New("pfsense: not implemented")
 
-// GetGateway is a stub; Task 8 lands the real impl.
+// GetGateway returns the named gateway. Translates 404 envelopes to
+// *APIError so callers can distinguish "not found" from "transport
+// error".
 func (c *pfClient) GetGateway(ctx context.Context, name string) (*Gateway, error) {
-	return nil, errNotImplemented
+	body, _, err := c.do(ctx, http.MethodGet,
+		"/api/v2/routing/gateway?id="+url.QueryEscape(name), nil)
+	if err != nil {
+		return nil, fmt.Errorf("pfsense GET gateway: %w", err)
+	}
+	var raw struct {
+		Name    string `json:"name"`
+		Gateway string `json:"gateway"`
+	}
+	if err := decodeEnvelope(body, &raw); err != nil {
+		return nil, err
+	}
+	return &Gateway{Name: raw.Name, IP: raw.Gateway}, nil
 }
 
 // UpdateGatewayIP is a stub; Task 9 lands the real impl.
