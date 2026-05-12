@@ -378,6 +378,47 @@ func TestRotate_PFSenseFailures_RevertSucceeds(t *testing.T) {
 	}
 }
 
+func TestRotate_CriticalCase_ApplyAndRevertBothFail(t *testing.T) {
+	f := newRotateFixture(t)
+	f.cfg.Behavior.AutoSyncPFSense = true
+
+	// First Apply errors. The revert's UpdateGatewayIP errors too.
+	f.pf.ApplyErr = []error{errors.New("apply boom"), errors.New("apply revert boom")}
+	f.pf.UpdateErr["100.64.0.1"] = errors.New("revert update boom") // the revert IP
+
+	_, err := f.core.Rotate(context.Background(), RotateOpts{Region: "asia-southeast1"})
+	if err == nil {
+		t.Fatalf("expected CriticalError, got nil")
+	}
+	var crit *CriticalError
+	if !errors.As(err, &crit) {
+		t.Fatalf("expected *CriticalError, got %T: %v", err, err)
+	}
+	if crit.NewNodeName != f.newNode.Name {
+		t.Errorf("NewNodeName = %q, want %q", crit.NewNodeName, f.newNode.Name)
+	}
+	if crit.NewDeviceID != f.newDev.ID {
+		t.Errorf("NewDeviceID = %q, want %q", crit.NewDeviceID, f.newDev.ID)
+	}
+	if crit.PrimaryErr == nil || crit.RevertErr == nil {
+		t.Errorf("PrimaryErr / RevertErr must both be non-nil; got primary=%v revert=%v",
+			crit.PrimaryErr, crit.RevertErr)
+	}
+
+	// HARD INVARIANT: new node NOT destroyed.
+	if hasCallWithArg(f.prov.calls, "Destroy", f.newNode.Name) {
+		t.Errorf("CRITICAL: new node was destroyed during critical-case rotate; calls=%v", f.prov.calls)
+	}
+	if hasCallWithArg(f.ts.calls, "DeleteDevice", f.newDev.ID) {
+		t.Errorf("CRITICAL: new device was deleted during critical-case rotate; calls=%v", f.ts.calls)
+	}
+
+	// Old node also NOT destroyed.
+	if hasCallWithArg(f.prov.calls, "Destroy", f.oldNode.Name) {
+		t.Errorf("old node was destroyed during critical-case rotate; calls=%v", f.prov.calls)
+	}
+}
+
 func TestRotateHappyPath_WithPFSense(t *testing.T) {
 	f := newRotateFixture(t)
 	f.cfg.Behavior.AutoSyncPFSense = true
