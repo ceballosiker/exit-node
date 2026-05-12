@@ -159,3 +159,42 @@ func TestEgressVia_RestoresEmptyWhenNoPriorExitNode(t *testing.T) {
 		t.Errorf("expected restore with empty exit-node, got %s %v", last.Name, last.Args)
 	}
 }
+
+func TestEgressDirect_HappyPath_RestoresPrior(t *testing.T) {
+	statusJSON := `{"ExitNodeStatus":{"ID":"prior-node-id"}}`
+	fake := &fakeRunner{
+		Responses: []fakeResponse{
+			{Stdout: statusJSON},               // status
+			{Stdout: ""},                       // set --exit-node= (clear)
+			{Stdout: "203.0.113.99\n"},         // curl
+			{Stdout: ""},                       // restore
+		},
+	}
+	p := &shellProbe{run: fake, probeURL: "https://x/ip"}
+	got, err := p.EgressDirect(context.Background())
+	if err != nil {
+		t.Fatalf("EgressDirect: %v", err)
+	}
+	if got != "203.0.113.99" {
+		t.Errorf("egress = %q", got)
+	}
+	// 2nd call clears, 4th call restores.
+	if got, want := fake.calls[1].Args, []string{"set", "--exit-node="}; !equalSlices(got, want) {
+		t.Errorf("clear call = %v, want %v", got, want)
+	}
+	if last := fake.calls[3]; !contains(last.Args, "--exit-node=prior-node-id") {
+		t.Errorf("restore call = %v", last)
+	}
+}
+
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

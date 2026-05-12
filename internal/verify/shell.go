@@ -104,6 +104,27 @@ func (p *shellProbe) captureExitNodeID(ctx context.Context) (string, error) {
 	return parsed.ExitNodeStatus.ID, nil
 }
 
+// EgressDirect curls the probe URL with no Tailscale exit-node override,
+// then restores the prior exit-node setting. Used for the post-cutover
+// check that traffic flows via the host's default route (LAN → pfSense →
+// new exit node).
+func (p *shellProbe) EgressDirect(ctx context.Context) (string, error) {
+	priorID, err := p.captureExitNodeID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("capture prior exit-node: %w", err)
+	}
+	defer p.restoreExitNode(priorID)
+
+	if _, err := p.run.Run(ctx, "tailscale", "set", "--exit-node="); err != nil {
+		return "", fmt.Errorf("clear exit-node: %w", err)
+	}
+	out, err := p.run.Run(ctx, "curl", "--silent", "--max-time", "10", p.probeURL)
+	if err != nil {
+		return "", fmt.Errorf("curl probe URL: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // restoreExitNode is best-effort; errors are intentionally swallowed
 // because we're already in a defer chain and the caller has its own
 // error to return. A failed restore is loud at the host level (you'll
