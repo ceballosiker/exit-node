@@ -11,21 +11,43 @@ import (
 	"github.com/iker/exit-node/internal/tailscale"
 )
 
-// callRecord captures the name and args of a mock invocation.
+// clock issues monotonically-increasing sequence numbers shared across all
+// mocks in a fixture, so the test can reconstruct the chronological order
+// of cross-mock calls (e.g. ts.Mint → prov.Provision → ts.WaitForDevice).
+type clock struct {
+	mu  sync.Mutex
+	seq int
+}
+
+func (c *clock) tick() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.seq++
+	return c.seq
+}
+
+// callRecord captures the name, args, and chronological sequence of a mock
+// invocation.
 type callRecord struct {
+	Seq  int
 	Name string
 	Args []any
 }
 
 type recorder struct {
 	mu    sync.Mutex
+	clock *clock // shared across mocks in the same fixture
 	calls []callRecord
 }
 
 func (r *recorder) record(name string, args ...any) {
+	seq := 0
+	if r.clock != nil {
+		seq = r.clock.tick()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.calls = append(r.calls, callRecord{Name: name, Args: args})
+	r.calls = append(r.calls, callRecord{Seq: seq, Name: name, Args: args})
 }
 
 func (r *recorder) names() []string {
@@ -59,6 +81,10 @@ func newMockProvider() *mockProvider {
 		GetResult:  map[string]*gcp.ExitNode{},
 	}
 }
+
+// attachClock wires a shared sequence clock into the mock's recorder so its
+// calls can be merged chronologically with other mocks in the fixture.
+func (m *mockProvider) attachClock(c *clock) { m.recorder.clock = c }
 
 func (m *mockProvider) Provision(ctx context.Context, opts gcp.ProvisionOpts) (*gcp.ExitNode, error) {
 	m.record("Provision", opts.Name, opts.Region, opts.MachineType)
@@ -112,6 +138,8 @@ func newMockTS() *mockTS {
 	}
 }
 
+func (m *mockTS) attachClock(c *clock) { m.recorder.clock = c }
+
 func (m *mockTS) MintEphemeralAuthKey(ctx context.Context, tags []string) (string, error) {
 	m.record("MintEphemeralAuthKey", tags)
 	if m.MintErr != nil {
@@ -157,6 +185,8 @@ func newMockPF() *mockPF {
 		UpdateErr: map[string]error{},
 	}
 }
+
+func (m *mockPF) attachClock(c *clock) { m.recorder.clock = c }
 
 func (m *mockPF) GetGateway(ctx context.Context, name string) (*pfsense.Gateway, error) {
 	m.record("GetGateway", name)
@@ -205,3 +235,5 @@ func (m *mockProbe) EgressDirect(ctx context.Context) (string, error) {
 	m.record("EgressDirect")
 	return m.EgressDirectResult, m.EgressDirectErr
 }
+
+func (m *mockProbe) attachClock(c *clock) { m.recorder.clock = c }
