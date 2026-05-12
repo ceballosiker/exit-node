@@ -308,6 +308,76 @@ func contains(s, substr string) bool {
 	return false
 }
 
+func TestRotate_PFSenseFailures_RevertSucceeds(t *testing.T) {
+	tests := []struct {
+		name          string
+		mutate        func(*rotateFixture)
+		wantErrSubstr string
+		// Whether we expect the gateway to be back at the old IP after revert.
+		wantGatewayRestored bool
+	}{
+		{
+			name: "UpdateGatewayIP fails (no Apply yet)",
+			mutate: func(f *rotateFixture) {
+				// Force UpdateGatewayIP(_, newTSIP) to fail.
+				f.pf.UpdateErr[f.newDev.TailscaleIP] = errors.New("update boom")
+			},
+			wantErrSubstr:       "update pfsense gateway",
+			wantGatewayRestored: true,
+		},
+		{
+			name: "Apply fails, revert succeeds",
+			mutate: func(f *rotateFixture) {
+				// First Apply errors; the revert's Apply succeeds.
+				f.pf.ApplyErr = []error{errors.New("apply boom"), nil}
+			},
+			wantErrSubstr:       "apply pfsense changes",
+			wantGatewayRestored: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRotateFixture(t)
+			f.cfg.Behavior.AutoSyncPFSense = true
+			tc.mutate(f)
+
+			_, err := f.core.Rotate(context.Background(), RotateOpts{Region: "asia-southeast1"})
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !contains(err.Error(), tc.wantErrSubstr) {
+				t.Errorf("err = %q, want %q", err.Error(), tc.wantErrSubstr)
+			}
+
+			// New node MUST be destroyed (cleanup ran).
+			if !hasCallWithArg(f.prov.calls, "Destroy", f.newNode.Name) {
+				t.Errorf("expected Destroy(new); calls=%v", f.prov.calls)
+			}
+			if !hasCallWithArg(f.ts.calls, "DeleteDevice", f.newDev.ID) {
+				t.Errorf("expected DeleteDevice(new); calls=%v", f.ts.calls)
+			}
+
+			// Gateway should be back at old IP.
+			if tc.wantGatewayRestored {
+				if got := f.pf.Gateways["GW"]; got != "100.64.0.1" {
+					t.Errorf("gateway IP = %s, want 100.64.0.1 (old)", got)
+				}
+			}
+
+			// Old node MUST NOT be destroyed.
+			if hasCallWithArg(f.prov.calls, "Destroy", f.oldNode.Name) {
+				t.Errorf("old node was destroyed; calls=%v", f.prov.calls)
+			}
+
+			// Error must NOT be a *CriticalError (revert succeeded).
+			var crit *CriticalError
+			if errors.As(err, &crit) {
+				t.Errorf("got CriticalError, want plain error: %v", crit)
+			}
+		})
+	}
+}
+
 func TestRotateHappyPath_WithPFSense(t *testing.T) {
 	f := newRotateFixture(t)
 	f.cfg.Behavior.AutoSyncPFSense = true
