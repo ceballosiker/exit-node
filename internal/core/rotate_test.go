@@ -450,6 +450,29 @@ func TestRotate_PostCutoverProbeFails_RevertsAndDestroys(t *testing.T) {
 	}
 }
 
+func TestRotate_OldNodeTeardownFailuresAreNonFatal(t *testing.T) {
+	f := newRotateFixture(t)
+	f.cfg.Behavior.AutoSyncPFSense = true
+	f.prov.DestroyErr[f.oldNode.Name] = errors.New("destroy old boom")
+	f.ts.DeleteDeviceErr[f.oldNode.DeviceID] = errors.New("delete old device boom")
+
+	res, err := f.core.Rotate(context.Background(), RotateOpts{Region: "asia-southeast1"})
+	if err != nil {
+		t.Fatalf("expected success despite old-teardown errors, got %v", err)
+	}
+	if res.New == nil || res.New.Name != f.newNode.Name {
+		t.Errorf("res.New = %v", res.New)
+	}
+	// State was updated to new node despite teardown failures.
+	got, err := f.store.GetActive()
+	if err != nil {
+		t.Fatalf("GetActive: %v", err)
+	}
+	if got == nil || got.Name != f.newNode.Name {
+		t.Errorf("state.Active = %v, want %s", got, f.newNode.Name)
+	}
+}
+
 func TestRotateHappyPath_WithPFSense(t *testing.T) {
 	f := newRotateFixture(t)
 	f.cfg.Behavior.AutoSyncPFSense = true
