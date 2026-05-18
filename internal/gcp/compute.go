@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
@@ -105,9 +106,91 @@ func (p *gcpProvider) Close() error {
 	return err
 }
 
-// Provision — Task 18 will implement.
+// Provision creates a new VM with the configured labels + metadata,
+// waits for it to reach RUNNING, and returns the populated ExitNode
+// record (including the assigned public IP).
+//
+// Zone selection: if opts.Zone is empty, the caller is expected to
+// have resolved a zone first (e.g., via PickZoneInRegion). v0.1 does
+// not implement auto-pick inside Provision because zone-picking
+// touches a separate API surface (ZonesClient).
 func (p *gcpProvider) Provision(ctx context.Context, opts ProvisionOpts) (*ExitNode, error) {
-	return nil, errNotImplemented
+	if opts.Zone == "" {
+		return nil, fmt.Errorf("gcp: Provision requires opts.Zone (auto-pick TODO)")
+	}
+	inst := p.buildInstanceResource(opts)
+
+	op, err := p.instances.Insert(ctx, &computepb.InsertInstanceRequest{
+		Project:          p.project,
+		Zone:             opts.Zone,
+		InstanceResource: inst,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gcp: instances.Insert: %w", err)
+	}
+	if err := op.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("gcp: wait for insert: %w", err)
+	}
+
+	got, err := p.instances.Get(ctx, &computepb.GetInstanceRequest{
+		Project: p.project, Zone: opts.Zone, Instance: opts.Name,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gcp: instances.Get after insert: %w", err)
+	}
+	return instanceToExitNode(got), nil
+}
+
+// instanceToExitNode converts a Compute API Instance to our ExitNode.
+func instanceToExitNode(inst *computepb.Instance) *ExitNode {
+	out := &ExitNode{
+		Name:        inst.GetName(),
+		Zone:        lastPathSegment(inst.GetZone()),
+		MachineType: lastPathSegment(inst.GetMachineType()),
+		State:       parseInstanceStatus(inst.GetStatus()),
+	}
+	out.Region = inst.GetLabels()["region"]
+	if t := inst.GetCreationTimestamp(); t != "" {
+		// RFC3339 from compute API.
+		if parsed, err := time.Parse(time.RFC3339, t); err == nil {
+			out.CreatedAt = parsed
+		}
+	}
+	for _, nic := range inst.GetNetworkInterfaces() {
+		for _, ac := range nic.GetAccessConfigs() {
+			if ip := ac.GetNatIP(); ip != "" {
+				out.PublicIP = ip
+				break
+			}
+		}
+	}
+	return out
+}
+
+// parseInstanceStatus maps Compute's status strings to our State enum.
+func parseInstanceStatus(s string) State {
+	switch s {
+	case "PROVISIONING", "STAGING":
+		return StatePending
+	case "RUNNING":
+		return StateRunning
+	case "STOPPING", "STOPPED", "SUSPENDED":
+		return StateStopped
+	case "TERMINATED":
+		return StateTerminated
+	default:
+		return StateUnknown
+	}
+}
+
+// lastPathSegment returns the substring after the final "/" — used to
+// trim resource URLs like ".../zones/us-west1-a" down to "us-west1-a".
+func lastPathSegment(s string) string {
+	i := strings.LastIndex(s, "/")
+	if i < 0 {
+		return s
+	}
+	return s[i+1:]
 }
 
 // Start — Task 19 will implement.
