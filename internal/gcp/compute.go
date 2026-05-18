@@ -156,11 +156,12 @@ func instanceToExitNode(inst *computepb.Instance) *ExitNode {
 			out.CreatedAt = parsed
 		}
 	}
+outer:
 	for _, nic := range inst.GetNetworkInterfaces() {
 		for _, ac := range nic.GetAccessConfigs() {
 			if ip := ac.GetNatIP(); ip != "" {
 				out.PublicIP = ip
-				break
+				break outer
 			}
 		}
 	}

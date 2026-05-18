@@ -3,6 +3,9 @@ package gcp
 import (
 	"context"
 	"testing"
+
+	"cloud.google.com/go/compute/apiv1/computepb"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestNewWithoutCreds_UsesADC(t *testing.T) {
@@ -109,5 +112,71 @@ func TestBuildInstanceResource_ShapesAllFields(t *testing.T) {
 	}
 	if got["tailscale-tags"] != "tag:exit-node,tag:home" {
 		t.Errorf("tailscale-tags = %q", got["tailscale-tags"])
+	}
+}
+
+func TestParseInstanceStatus(t *testing.T) {
+	cases := []struct {
+		in   string
+		want State
+	}{
+		{"PROVISIONING", StatePending},
+		{"STAGING", StatePending},
+		{"RUNNING", StateRunning},
+		{"STOPPING", StateStopped},
+		{"STOPPED", StateStopped},
+		{"SUSPENDED", StateStopped},
+		{"TERMINATED", StateTerminated},
+		{"", StateUnknown},
+		{"weird-new-state", StateUnknown},
+	}
+	for _, c := range cases {
+		if got := parseInstanceStatus(c.in); got != c.want {
+			t.Errorf("parseInstanceStatus(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestLastPathSegment(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"projects/p/zones/us-west1-a", "us-west1-a"},
+		{"plain", "plain"},
+		{"trailing/", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := lastPathSegment(c.in); got != c.want {
+			t.Errorf("lastPathSegment(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestInstanceToExitNode_PublicIPFromFirstAccessConfig(t *testing.T) {
+	inst := &computepb.Instance{
+		Name:        proto.String("vpn-1"),
+		Zone:        proto.String("https://www.googleapis.com/.../zones/us-west1-a"),
+		MachineType: proto.String("https://www.googleapis.com/.../zones/us-west1-a/machineTypes/e2-micro"),
+		Status:      proto.String("RUNNING"),
+		Labels:      map[string]string{"region": "us-west1"},
+		NetworkInterfaces: []*computepb.NetworkInterface{
+			{AccessConfigs: []*computepb.AccessConfig{{NatIP: proto.String("1.2.3.4")}}},
+			{AccessConfigs: []*computepb.AccessConfig{{NatIP: proto.String("5.6.7.8")}}},
+		},
+	}
+	got := instanceToExitNode(inst)
+	if got.PublicIP != "1.2.3.4" {
+		t.Errorf("PublicIP = %q, want 1.2.3.4 (first NIC's first AccessConfig)", got.PublicIP)
+	}
+	if got.Zone != "us-west1-a" {
+		t.Errorf("Zone = %q", got.Zone)
+	}
+	if got.MachineType != "e2-micro" {
+		t.Errorf("MachineType = %q", got.MachineType)
+	}
+	if got.State != StateRunning {
+		t.Errorf("State = %v, want StateRunning", got.State)
+	}
+	if got.Region != "us-west1" {
+		t.Errorf("Region = %q", got.Region)
 	}
 }
