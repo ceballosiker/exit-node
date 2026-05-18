@@ -12,6 +12,7 @@ import (
 
 	compute "cloud.google.com/go/compute/apiv1"
 	"cloud.google.com/go/compute/apiv1/computepb"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/protobuf/proto"
 )
@@ -194,19 +195,79 @@ func lastPathSegment(s string) string {
 	return s[i+1:]
 }
 
-// Start — Task 19 will implement.
+// Start brings a stopped VM back online.
 func (p *gcpProvider) Start(ctx context.Context, name string) error {
-	return errNotImplemented
+	zone, err := p.findZone(ctx, name)
+	if err != nil {
+		return err
+	}
+	op, err := p.instances.Start(ctx, &computepb.StartInstanceRequest{
+		Project: p.project, Zone: zone, Instance: name,
+	})
+	if err != nil {
+		return fmt.Errorf("gcp: instances.Start: %w", err)
+	}
+	return op.Wait(ctx)
 }
 
-// Stop — Task 19 will implement.
+// Stop shuts down a VM (preserves disk).
 func (p *gcpProvider) Stop(ctx context.Context, name string) error {
-	return errNotImplemented
+	zone, err := p.findZone(ctx, name)
+	if err != nil {
+		return err
+	}
+	op, err := p.instances.Stop(ctx, &computepb.StopInstanceRequest{
+		Project: p.project, Zone: zone, Instance: name,
+	})
+	if err != nil {
+		return fmt.Errorf("gcp: instances.Stop: %w", err)
+	}
+	return op.Wait(ctx)
 }
 
-// Destroy — Task 19 will implement.
+// Destroy deletes a VM permanently.
 func (p *gcpProvider) Destroy(ctx context.Context, name string) error {
-	return errNotImplemented
+	zone, err := p.findZone(ctx, name)
+	if err != nil {
+		// If it's already gone, that's fine for rotate cleanup.
+		if strings.Contains(err.Error(), "not found") {
+			return nil
+		}
+		return err
+	}
+	op, err := p.instances.Delete(ctx, &computepb.DeleteInstanceRequest{
+		Project: p.project, Zone: zone, Instance: name,
+	})
+	if err != nil {
+		return fmt.Errorf("gcp: instances.Delete: %w", err)
+	}
+	return op.Wait(ctx)
+}
+
+// findZone walks AggregatedList to locate the zone of a managed
+// instance by name. Returns the zone (e.g., "us-west1-a") or an error
+// if no matching instance exists.
+func (p *gcpProvider) findZone(ctx context.Context, name string) (string, error) {
+	it := p.instances.AggregatedList(ctx, &computepb.AggregatedListInstancesRequest{
+		Project: p.project,
+		Filter:  proto.String(`labels.managed-by=exitnode`),
+	})
+	for {
+		pair, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("gcp: aggregated list: %w", err)
+		}
+		// Pair is (zone-key, *InstancesScopedList). Zone key looks like "zones/us-west1-a".
+		for _, inst := range pair.Value.GetInstances() {
+			if inst.GetName() == name {
+				return lastPathSegment(pair.Key), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("gcp: instance %q not found among managed nodes", name)
 }
 
 // List — Task 20 will implement.
