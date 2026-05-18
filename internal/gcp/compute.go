@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	compute "cloud.google.com/go/compute/apiv1"
+	"cloud.google.com/go/compute/apiv1/computepb"
 	"google.golang.org/api/option"
+	"google.golang.org/protobuf/proto"
 )
 
 // errNotImplemented is returned by stub methods that will be filled in by
@@ -131,4 +133,57 @@ func (p *gcpProvider) List(ctx context.Context) ([]*ExitNode, error) {
 // Get — Task 20 will implement.
 func (p *gcpProvider) Get(ctx context.Context, name string) (*ExitNode, error) {
 	return nil, errNotImplemented
+}
+
+// buildInstanceResource constructs the *computepb.Instance that
+// Provision passes to Insert. Separated so we can shape-test it
+// without hitting the API.
+func (p *gcpProvider) buildInstanceResource(opts ProvisionOpts) *computepb.Instance {
+	labels := map[string]string{
+		"managed-by": "exitnode",
+		"region":     opts.Region,
+	}
+
+	scriptURL := opts.InstallScriptURL
+	if scriptURL == "" {
+		scriptURL = p.scriptURL
+	}
+	diskGB := int64(opts.DiskSizeGB)
+	if diskGB == 0 {
+		diskGB = p.diskGB
+	}
+	network := opts.Network
+	if network == "" {
+		network = p.network
+	}
+
+	return &computepb.Instance{
+		Name:        proto.String(opts.Name),
+		MachineType: proto.String(fmt.Sprintf("zones/%s/machineTypes/%s", opts.Zone, opts.MachineType)),
+		Labels:      labels,
+		Disks: []*computepb.AttachedDisk{{
+			Boot:       proto.Bool(true),
+			AutoDelete: proto.Bool(true),
+			Type:       proto.String("PERSISTENT"),
+			InitializeParams: &computepb.AttachedDiskInitializeParams{
+				DiskSizeGb:  proto.Int64(diskGB),
+				SourceImage: proto.String("projects/debian-cloud/global/images/family/debian-12"),
+			},
+		}},
+		NetworkInterfaces: []*computepb.NetworkInterface{{
+			Network: proto.String("global/networks/" + network),
+			AccessConfigs: []*computepb.AccessConfig{{
+				Type: proto.String("ONE_TO_ONE_NAT"),
+				Name: proto.String("External NAT"),
+			}},
+		}},
+		Metadata: &computepb.Metadata{
+			Items: []*computepb.Items{
+				{Key: proto.String("startup-script-url"), Value: proto.String(scriptURL)},
+				{Key: proto.String("tailscale-auth-key"), Value: proto.String(opts.TailscaleAuthKey)},
+				{Key: proto.String("tailscale-hostname"), Value: proto.String(opts.Hostname)},
+				{Key: proto.String("tailscale-tags"), Value: proto.String(strings.Join(opts.Tags, ","))},
+			},
+		},
+	}
 }
