@@ -21,6 +21,22 @@ import (
 // later tasks in Plan 2 (Tasks 18-20).
 var errNotImplemented = errors.New("gcp: not implemented")
 
+// ErrInstanceNotFound is returned by findZone when no managed instance
+// matches the given name. Destroy uses errors.Is to treat this as an
+// idempotent no-op during rotate cleanup.
+var ErrInstanceNotFound = errors.New("gcp: instance not found")
+
+const (
+	// labelManagedBy is the GCP instance label key we apply to every
+	// managed exit-node so we can filter aggregated lists by it.
+	labelManagedBy = "managed-by"
+	// labelManagedByValue is the value paired with labelManagedBy.
+	labelManagedByValue = "exitnode"
+	// filterManagedByExitnode is the AggregatedList filter expression
+	// matching only instances with the managed-by=exitnode label.
+	filterManagedByExitnode = "labels." + labelManagedBy + "=" + labelManagedByValue
+)
+
 // Options configures the GCP Provider.
 type Options struct {
 	// Project is the GCP project ID. Required.
@@ -230,7 +246,7 @@ func (p *gcpProvider) Destroy(ctx context.Context, name string) error {
 	zone, err := p.findZone(ctx, name)
 	if err != nil {
 		// If it's already gone, that's fine for rotate cleanup.
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, ErrInstanceNotFound) {
 			return nil
 		}
 		return err
@@ -250,7 +266,7 @@ func (p *gcpProvider) Destroy(ctx context.Context, name string) error {
 func (p *gcpProvider) findZone(ctx context.Context, name string) (string, error) {
 	it := p.instances.AggregatedList(ctx, &computepb.AggregatedListInstancesRequest{
 		Project: p.project,
-		Filter:  proto.String(`labels.managed-by=exitnode`),
+		Filter:  proto.String(filterManagedByExitnode),
 	})
 	for {
 		pair, err := it.Next()
@@ -267,7 +283,7 @@ func (p *gcpProvider) findZone(ctx context.Context, name string) (string, error)
 			}
 		}
 	}
-	return "", fmt.Errorf("gcp: instance %q not found among managed nodes", name)
+	return "", fmt.Errorf("%w: %q among managed nodes", ErrInstanceNotFound, name)
 }
 
 // List — Task 20 will implement.
@@ -285,8 +301,8 @@ func (p *gcpProvider) Get(ctx context.Context, name string) (*ExitNode, error) {
 // without hitting the API.
 func (p *gcpProvider) buildInstanceResource(opts ProvisionOpts) *computepb.Instance {
 	labels := map[string]string{
-		"managed-by": "exitnode",
-		"region":     opts.Region,
+		labelManagedBy: labelManagedByValue,
+		"region":       opts.Region,
 	}
 
 	scriptURL := opts.InstallScriptURL
