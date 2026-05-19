@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -317,6 +318,38 @@ func (p *gcpProvider) Get(ctx context.Context, name string) (*ExitNode, error) {
 		return nil, err
 	}
 	return instanceToExitNode(inst), nil
+}
+
+// PickZoneInRegion returns a random zone in the given region whose
+// status is UP. The Provider exposes this helper because zone
+// selection touches a separate API (ZonesClient) and the orchestrator
+// in internal/core needs it before calling Provision.
+func (p *gcpProvider) PickZoneInRegion(ctx context.Context, region string) (string, error) {
+	it := p.zones.List(ctx, &computepb.ListZonesRequest{
+		Project: p.project,
+	})
+	var ups []string
+	for {
+		z, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("gcp: list zones: %w", err)
+		}
+		if z.GetStatus() != "UP" {
+			continue
+		}
+		// z.GetRegion() is a full URL like ".../regions/us-west1".
+		if lastPathSegment(z.GetRegion()) != region {
+			continue
+		}
+		ups = append(ups, z.GetName())
+	}
+	if len(ups) == 0 {
+		return "", fmt.Errorf("gcp: no UP zones in region %q", region)
+	}
+	return ups[rand.IntN(len(ups))], nil
 }
 
 // buildInstanceResource constructs the *computepb.Instance that
