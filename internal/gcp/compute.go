@@ -17,10 +17,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// errNotImplemented is returned by stub methods that will be filled in by
-// later tasks in Plan 2 (Tasks 18-20).
-var errNotImplemented = errors.New("gcp: not implemented")
-
 // ErrInstanceNotFound is returned by findZone when no managed instance
 // matches the given name. Destroy uses errors.Is to treat this as an
 // idempotent no-op during rotate cleanup.
@@ -286,14 +282,46 @@ func (p *gcpProvider) findZone(ctx context.Context, name string) (string, error)
 	return "", fmt.Errorf("%w: %q among managed nodes", ErrInstanceNotFound, name)
 }
 
-// List — Task 20 will implement.
+// List returns all VMs managed by exitnode across all zones.
 func (p *gcpProvider) List(ctx context.Context) ([]*ExitNode, error) {
-	return nil, errNotImplemented
+	it := p.instances.AggregatedList(ctx, &computepb.AggregatedListInstancesRequest{
+		Project: p.project,
+		Filter:  proto.String(filterManagedByExitnode),
+	})
+	var out []*ExitNode
+	for {
+		pair, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("gcp: aggregated list: %w", err)
+		}
+		for _, inst := range pair.Value.GetInstances() {
+			out = append(out, instanceToExitNode(inst))
+		}
+	}
+	return out, nil
 }
 
-// Get — Task 20 will implement.
+// Get fetches a single managed instance by name. Returns (nil, nil) if
+// not found — the caller distinguishes "missing" from "error" by
+// inspecting both return values.
 func (p *gcpProvider) Get(ctx context.Context, name string) (*ExitNode, error) {
-	return nil, errNotImplemented
+	zone, err := p.findZone(ctx, name)
+	if err != nil {
+		if errors.Is(err, ErrInstanceNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	got, err := p.instances.Get(ctx, &computepb.GetInstanceRequest{
+		Project: p.project, Zone: zone, Instance: name,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gcp: instances.Get: %w", err)
+	}
+	return instanceToExitNode(got), nil
 }
 
 // buildInstanceResource constructs the *computepb.Instance that
