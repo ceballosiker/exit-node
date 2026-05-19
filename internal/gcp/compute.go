@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// ErrInstanceNotFound is returned by findZone when no managed instance
+// ErrInstanceNotFound is returned by findInstance when no managed instance
 // matches the given name. Destroy uses errors.Is to treat this as an
 // idempotent no-op during rotate cleanup.
 var ErrInstanceNotFound = errors.New("gcp: instance not found")
@@ -209,7 +209,7 @@ func lastPathSegment(s string) string {
 
 // Start brings a stopped VM back online.
 func (p *gcpProvider) Start(ctx context.Context, name string) error {
-	zone, err := p.findZone(ctx, name)
+	zone, _, err := p.findInstance(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -224,7 +224,7 @@ func (p *gcpProvider) Start(ctx context.Context, name string) error {
 
 // Stop shuts down a VM (preserves disk).
 func (p *gcpProvider) Stop(ctx context.Context, name string) error {
-	zone, err := p.findZone(ctx, name)
+	zone, _, err := p.findInstance(ctx, name)
 	if err != nil {
 		return err
 	}
@@ -239,7 +239,7 @@ func (p *gcpProvider) Stop(ctx context.Context, name string) error {
 
 // Destroy deletes a VM permanently.
 func (p *gcpProvider) Destroy(ctx context.Context, name string) error {
-	zone, err := p.findZone(ctx, name)
+	zone, _, err := p.findInstance(ctx, name)
 	if err != nil {
 		// If it's already gone, that's fine for rotate cleanup.
 		if errors.Is(err, ErrInstanceNotFound) {
@@ -256,30 +256,31 @@ func (p *gcpProvider) Destroy(ctx context.Context, name string) error {
 	return op.Wait(ctx)
 }
 
-// findZone walks AggregatedList to locate the zone of a managed
-// instance by name. Returns the zone (e.g., "us-west1-a") or an error
-// if no matching instance exists.
-func (p *gcpProvider) findZone(ctx context.Context, name string) (string, error) {
+// findInstance walks AggregatedList to locate a managed instance by
+// name. Returns the zone (e.g., "us-west1-a") and the matching
+// *computepb.Instance proto, or ErrInstanceNotFound (wrapped) if no
+// managed instance with that name exists.
+func (p *gcpProvider) findInstance(ctx context.Context, name string) (zone string, inst *computepb.Instance, err error) {
 	it := p.instances.AggregatedList(ctx, &computepb.AggregatedListInstancesRequest{
 		Project: p.project,
 		Filter:  proto.String(filterManagedByExitnode),
 	})
 	for {
-		pair, err := it.Next()
-		if errors.Is(err, iterator.Done) {
+		pair, iterErr := it.Next()
+		if errors.Is(iterErr, iterator.Done) {
 			break
 		}
-		if err != nil {
-			return "", fmt.Errorf("gcp: aggregated list: %w", err)
+		if iterErr != nil {
+			return "", nil, fmt.Errorf("gcp: aggregated list: %w", iterErr)
 		}
 		// Pair is (zone-key, *InstancesScopedList). Zone key looks like "zones/us-west1-a".
-		for _, inst := range pair.Value.GetInstances() {
-			if inst.GetName() == name {
-				return lastPathSegment(pair.Key), nil
+		for _, candidate := range pair.Value.GetInstances() {
+			if candidate.GetName() == name {
+				return lastPathSegment(pair.Key), candidate, nil
 			}
 		}
 	}
-	return "", fmt.Errorf("%w: %q among managed nodes", ErrInstanceNotFound, name)
+	return "", nil, fmt.Errorf("%w: %q among managed nodes", ErrInstanceNotFound, name)
 }
 
 // List returns all VMs managed by exitnode across all zones.
@@ -308,20 +309,14 @@ func (p *gcpProvider) List(ctx context.Context) ([]*ExitNode, error) {
 // not found — the caller distinguishes "missing" from "error" by
 // inspecting both return values.
 func (p *gcpProvider) Get(ctx context.Context, name string) (*ExitNode, error) {
-	zone, err := p.findZone(ctx, name)
+	_, inst, err := p.findInstance(ctx, name)
 	if err != nil {
 		if errors.Is(err, ErrInstanceNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	got, err := p.instances.Get(ctx, &computepb.GetInstanceRequest{
-		Project: p.project, Zone: zone, Instance: name,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("gcp: instances.Get: %w", err)
-	}
-	return instanceToExitNode(got), nil
+	return instanceToExitNode(inst), nil
 }
 
 // buildInstanceResource constructs the *computepb.Instance that
