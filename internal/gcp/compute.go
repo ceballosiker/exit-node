@@ -320,13 +320,21 @@ func (p *gcpProvider) Get(ctx context.Context, name string) (*ExitNode, error) {
 	return instanceToExitNode(inst), nil
 }
 
-// PickZoneInRegion returns a random zone in the given region whose
-// status is UP. The Provider exposes this helper because zone
-// selection touches a separate API (ZonesClient) and the orchestrator
-// in internal/core needs it before calling Provision.
+// PickZoneInRegion returns a random UP zone within the given region.
+// region must be a bare region name (e.g., "us-west1"), not a resource
+// URL. Returns an error if region is empty or if no UP zones are
+// found in that region.
+//
+// Not part of the Provider interface — callers type-assert to
+// *gcpProvider. Zone selection lives here because it touches the
+// separate ZonesClient API surface.
 func (p *gcpProvider) PickZoneInRegion(ctx context.Context, region string) (string, error) {
+	if region == "" {
+		return "", errors.New("gcp: PickZoneInRegion: region required")
+	}
 	it := p.zones.List(ctx, &computepb.ListZonesRequest{
 		Project: p.project,
+		Filter:  proto.String("status = UP"),
 	})
 	var ups []string
 	for {
@@ -336,9 +344,6 @@ func (p *gcpProvider) PickZoneInRegion(ctx context.Context, region string) (stri
 		}
 		if err != nil {
 			return "", fmt.Errorf("gcp: list zones: %w", err)
-		}
-		if z.GetStatus() != "UP" {
-			continue
 		}
 		// z.GetRegion() is a full URL like ".../regions/us-west1".
 		if lastPathSegment(z.GetRegion()) != region {
