@@ -73,7 +73,6 @@ func defaultStatePath() string {
 // Subcommand stubs (real impls in subsequent tasks). Kept visible (not
 // Hidden) so the help-output smoke test in Step 7 passes even before
 // the real impls land.
-func newDownCmd(*rootOpts) *cobra.Command    { return &cobra.Command{Use: "down"} }
 func newRotateCmd(*rootOpts) *cobra.Command  { return &cobra.Command{Use: "rotate"} }
 func newListCmd(*rootOpts) *cobra.Command    { return &cobra.Command{Use: "list"} }
 func newStatusCmd(*rootOpts) *cobra.Command  { return &cobra.Command{Use: "status"} }
