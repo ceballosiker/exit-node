@@ -9,6 +9,7 @@ import (
 	"github.com/iker/exit-node/internal/config"
 	"github.com/iker/exit-node/internal/gcp"
 	"github.com/iker/exit-node/internal/state"
+	"github.com/iker/exit-node/internal/tailscale"
 )
 
 type namedFixtureT struct {
@@ -147,5 +148,85 @@ func TestStop_RejectsEmptyName(t *testing.T) {
 	// Provider.Stop must not have been called.
 	if hasCallWithArg(f.prov.calls, "Stop", "") {
 		t.Errorf("provider.Stop was called despite empty name")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Destroy tests
+// ---------------------------------------------------------------------------
+
+func TestDestroy_HappyPath_DestroysVMAndDevice(t *testing.T) {
+	f := namedFixture(t, nil)
+	f.ts.WaitDevice = &tailscale.Device{ID: "device-1", Hostname: "vpn-us-central1-abc"}
+
+	if err := f.c.Destroy(context.Background(), "vpn-us-central1-abc"); err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+	if !hasCallWithArg(f.prov.calls, "Destroy", "vpn-us-central1-abc") {
+		t.Errorf("provider.Destroy not called with expected name; calls=%v", f.prov.calls)
+	}
+	if !hasCallWithArg(f.ts.calls, "DeleteDevice", "device-1") {
+		t.Errorf("ts.DeleteDevice not called with expected device ID; calls=%v", f.ts.calls)
+	}
+}
+
+func TestDestroy_ClearsStateWhenNameMatchesActive(t *testing.T) {
+	active := &gcp.ExitNode{Name: "vpn-us-central1-abc", State: gcp.StateRunning}
+	f := namedFixture(t, active)
+	f.ts.WaitDevice = &tailscale.Device{ID: "device-1", Hostname: "vpn-us-central1-abc"}
+
+	if err := f.c.Destroy(context.Background(), "vpn-us-central1-abc"); err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+	got, err := f.store.GetActive()
+	if err != nil {
+		t.Fatalf("GetActive: %v", err)
+	}
+	if got != nil {
+		t.Errorf("state not cleared after destroy: %+v", got)
+	}
+}
+
+func TestDestroy_LeavesStateAloneWhenNameMismatch(t *testing.T) {
+	active := &gcp.ExitNode{Name: "vpn-eu-west1-xyz", State: gcp.StateRunning, PublicIP: "9.9.9.9"}
+	f := namedFixture(t, active)
+	f.ts.WaitDevice = &tailscale.Device{ID: "device-1", Hostname: "vpn-us-central1-abc"}
+
+	if err := f.c.Destroy(context.Background(), "vpn-us-central1-abc"); err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+	got, err := f.store.GetActive()
+	if err != nil {
+		t.Fatalf("GetActive: %v", err)
+	}
+	if got == nil || got.Name != "vpn-eu-west1-xyz" {
+		t.Errorf("active state mutated unexpectedly: %+v", got)
+	}
+}
+
+func TestDestroy_DeviceLookupFails_ProceedsWithVMDestroy(t *testing.T) {
+	f := namedFixture(t, nil)
+	f.ts.WaitErr = errors.New("device not found")
+	// WaitDevice is nil — mockTS returns (nil, WaitErr) when WaitErr is set.
+
+	if err := f.c.Destroy(context.Background(), "vpn-us-central1-abc"); err != nil {
+		t.Fatalf("Destroy: %v", err)
+	}
+	if !hasCallWithArg(f.prov.calls, "Destroy", "vpn-us-central1-abc") {
+		t.Errorf("provider.Destroy not called with expected name; calls=%v", f.prov.calls)
+	}
+	if hasCallWithArg(f.ts.calls, "DeleteDevice", "device-1") {
+		t.Errorf("ts.DeleteDevice must not be called when device lookup failed; calls=%v", f.ts.calls)
+	}
+}
+
+func TestDestroy_RejectsEmptyName(t *testing.T) {
+	f := namedFixture(t, nil)
+	err := f.c.Destroy(context.Background(), "")
+	if !errors.Is(err, ErrNameRequired) {
+		t.Errorf("got %v, want ErrNameRequired", err)
+	}
+	if hasCallWithArg(f.prov.calls, "Destroy", "") {
+		t.Errorf("provider.Destroy must not be called for empty name")
 	}
 }
