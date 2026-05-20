@@ -2,16 +2,11 @@
 
 [![Go Version](https://img.shields.io/badge/go-1.25-00ADD8?logo=go)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Status: Pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)](#status)
+[![CI](https://github.com/ceballosiker/exit-node/actions/workflows/ci.yml/badge.svg)](https://github.com/ceballosiker/exit-node/actions/workflows/ci.yml)
 
 On-demand Tailscale exit nodes that rotate across cloud regions and keep your
 pfSense gateway in sync. Driven from a CLI for humans and an MCP server for
 AI agents.
-
-> **Status**: pre-alpha (v0.1). All library packages, both binaries
-> (`exitnode`, `exitnode-mcp`), CI, and release packaging are in
-> place. The first tagged release will produce binaries for
-> linux/darwin × amd64/arm64.
 
 ## Why
 
@@ -52,7 +47,7 @@ Four narrow client interfaces, one orchestrator:
 
 | Package | Responsibility |
 | --- | --- |
-| `internal/core` | Rotate state machine + `up` / `down` / `status` / `health` / `cost` / `list` / `sync` actions |
+| `internal/core` | Rotate state machine + lifecycle ops (`Up` / `Down` / `Rotate` / `Start` / `Stop` / `Destroy` / `List` / `Status` / `Health` / `SyncPFSense` / `EstimateCost`) — single source of truth for business logic, called by both the CLI and the MCP server |
 | `internal/config` | Typed configuration loader (project, region, tags, pfSense, gateway names) |
 | `internal/state` | On-disk state file — what's currently running, last rotation, prior nodes |
 | `internal/gcp` | Compute Engine adapter — `Provision` / `Start` / `Stop` / `Destroy` / `List` / `Get` |
@@ -68,16 +63,26 @@ also has a `//go:build integration` smoke test that exercises real GCP
 
 ```
 exit-node/
+├── cmd/
+│   ├── exitnode/          # cobra CLI binary
+│   └── exitnode-mcp/      # MCP stdio server binary
 ├── internal/
-│   ├── config/        # config loader
-│   ├── state/         # on-disk state
-│   ├── core/          # rotate orchestrator + action commands
-│   ├── gcp/           # GCP Compute Engine adapter
-│   ├── tailscale/     # Tailscale v2 API adapter
-│   ├── pfsense/       # pfSense REST adapter
-│   └── verify/        # egress probes
+│   ├── config/            # TOML loader + env-var resolution
+│   ├── core/              # rotate orchestrator + lifecycle ops
+│   ├── gcp/               # GCP Compute Engine adapter
+│   ├── pfsense/           # pfSense REST adapter
+│   ├── state/             # on-disk state cache (flock-protected)
+│   ├── tailscale/         # Tailscale v2 API adapter
+│   └── verify/            # egress probes
+├── examples/
+│   ├── config.toml        # annotated reference config
+│   └── mcp.json           # Claude Desktop / OpenClaw MCP snippet
 ├── scripts/
-│   └── install.sh     # VM first-boot bootstrap (fetched via startup-script-url)
+│   └── install.sh         # VM first-boot bootstrap (fetched via startup-script-url)
+├── .github/workflows/
+│   ├── ci.yml             # vet + lint + race tests + cross-build matrix
+│   └── release.yml        # goreleaser on tag push
+├── .goreleaser.yaml
 ├── Makefile
 ├── go.mod
 └── README.md
@@ -218,19 +223,21 @@ hung. Confirm with `lsof ~/.config/exitnode/state.json.lock`; if
 nothing holds it, the lock file is stale and safe to delete with
 `rm ~/.config/exitnode/state.json.lock`.
 
-## Roadmap
+## What's next
 
-Work is staged in three sequential plans:
+v0.1 covers the GCP + Tailscale + pfSense path the spec calls out as the
+core use case. Items deferred for later versions:
 
-- **Plan 1 — Foundation & Core.** Module layout, `internal/config`,
-  `internal/state`, interface definitions for all four clients, and the
-  `internal/core` rotate orchestrator with table-driven mocked tests.
-  ✅ Complete.
-- **Plan 2 — Real client implementations.** `internal/gcp`,
-  `internal/tailscale`, `internal/pfsense`, `internal/verify`, and
-  `scripts/install.sh`. ✅ Complete.
-- **Plan 3 — Binaries & distribution.** `cmd/exitnode`, `cmd/exitnode-mcp`,
-  examples, CI workflows, and goreleaser packaging. ✅ Complete.
+- **HTTP/SSE MCP transport** so the MCP server can be hosted remotely
+  rather than only over stdio.
+- **`--strict-verify`** flag to promote "no `tailscale` CLI on host" from
+  a silent probe-skip to a hard failure.
+- **Additional cloud providers** — AWS and Hetzner implementations of
+  the `Provider` interface.
+- **Netgate Plus pfSense API** as a second `PFSenseClient` implementation
+  for users on the official Netgate plugin instead of the community one.
+- **Scheduled rotation + auto-teardown on idle.**
+- **Homebrew tap** for `brew install exitnode`.
 
 ## License
 
