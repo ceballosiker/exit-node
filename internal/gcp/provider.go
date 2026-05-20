@@ -11,5 +11,8 @@ type Provider interface {
 	Stop(ctx context.Context, name string) error
 	Destroy(ctx context.Context, name string) error
 	List(ctx context.Context) ([]*ExitNode, error)
+	// Get fetches a single managed instance by name.
+	// Returns (nil, nil) if no instance with that name exists; any other
+	// error (transport, permissions, etc.) is returned as (nil, err).
 	Get(ctx context.Context, name string) (*ExitNode, error)
 }
