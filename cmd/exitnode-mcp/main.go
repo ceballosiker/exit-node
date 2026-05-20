@@ -18,7 +18,7 @@ func main() {
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "exitnode-mcp",
-		Version: "0.1.0",
+		Version: version,
 	}, nil)
 
 	registerTools(server)
