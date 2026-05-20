@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/iker/exit-node/internal/config"
 	"github.com/iker/exit-node/internal/core"
 	"github.com/iker/exit-node/internal/gcp"
@@ -104,5 +102,3 @@ func buildCore(ctx context.Context) (*core.Core, func(), error) {
 	return c, func() { _ = store.Close() }, nil
 }
 
-// registerTools is implemented in tools.go.
-func registerTools(*mcp.Server) {}
