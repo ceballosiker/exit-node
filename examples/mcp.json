@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "exitnode": {
+      "command": "exitnode-mcp",
+      "args": [],
+      "env": {
+        "TAILSCALE_OAUTH_CLIENT_ID": "$TAILSCALE_OAUTH_CLIENT_ID",
+        "TAILSCALE_OAUTH_CLIENT_SECRET": "$TAILSCALE_OAUTH_CLIENT_SECRET",
+        "PFSENSE_API_KEY": "$PFSENSE_API_KEY"
+      }
+    }
+  }
+}

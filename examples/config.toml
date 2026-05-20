@@ -1,0 +1,76 @@
+# exitnode — reference configuration.
+#
+# Copy this file to ~/.config/exitnode/config.toml and edit the values
+# for your environment. All env-var names are configurable here so that
+# you can pick whatever naming convention your secret store uses.
+
+[gcp]
+# GCP project ID that hosts the exit-node VMs.
+project              = "my-gcp-project"
+# Default region used by `exitnode up` and `exitnode rotate` when no
+# --region flag is given.
+default_region       = "us-west1"
+# Default machine type. e2-micro is the cheapest x86_64; e2-small is
+# the cheapest with more than 1 vCPU.
+default_machine_type = "e2-micro"
+# Default zone within the region. Empty → exit-node picks a random
+# UP zone in the region at provision time.
+default_zone         = ""
+# VPC network name. "default" is the auto-created VPC every GCP
+# project starts with.
+network              = "default"
+# Boot disk size in GiB. The image is debian-12; 10 GiB is comfortably
+# above the image's actual footprint.
+disk_size_gb         = 10
+
+[tailscale]
+# Your tailnet name — visible at the top of the Tailscale admin console.
+tailnet                 = "example.com"
+# Env-var names holding the OAuth client-credentials. Both are required.
+# Create the OAuth client at https://login.tailscale.com/admin/settings/oauth
+# with scopes "auth_keys" (write) and "devices:core" (write).
+oauth_client_id_env     = "TAILSCALE_OAUTH_CLIENT_ID"
+oauth_client_secret_env = "TAILSCALE_OAUTH_CLIENT_SECRET"
+# Tags applied to every provisioned device. Must be defined in your
+# tailnet's ACL `tagOwners`.
+tags                    = ["tag:exit-node"]
+# How long the ephemeral auth key minted for each new VM remains valid
+# before Tailscale rejects it. 5m is generous — the VM consumes the key
+# on first boot, usually within 60 seconds.
+ephemeral_key_ttl       = "5m"
+
+[pfsense]
+# pfSense webConfigurator host or IP. No trailing slash.
+host         = "https://pfsense.lan"
+# Env-var name holding the pfsense-api plugin API key.
+api_key_env  = "PFSENSE_API_KEY"
+# Name of the gateway you've configured in System → Routing → Gateways
+# that points at the Tailscale interface. exitnode patches its
+# monitor-IP to follow the active exit node.
+gateway_name = "TAILSCALE_VPN_GW"
+# Set false to skip TLS verification (only safe for the default
+# self-signed cert on a trusted LAN).
+verify_tls   = true
+
+[behavior]
+# When true, every `exitnode up` and `exitnode rotate` runs the
+# pfsense sync step automatically. Set false if you want to drive
+# pfsense sync manually via `exitnode pfsense sync`.
+auto_sync_pfsense    = true
+# Pre-cutover probe — verifies egress through the candidate node
+# from your orchestrator host BEFORE swapping pfSense over. Strongly
+# recommended.
+verify_pre_cutover   = true
+# Post-cutover probe — re-verifies egress through the LAN gateway
+# AFTER pfSense is swapped. Default off because it requires the
+# orchestrator host to use pfSense as its default route.
+verify_post_cutover  = false
+# Public probe URL. Anything that returns the caller's IP as plain
+# text works (api.ipify.org, ifconfig.me, etc.).
+probe_url            = "https://api.ipify.org"
+# How long exitnode will wait for the new VM's Tailscale device to
+# appear in the API after provision.
+registration_timeout = "90s"
+# Public URL of scripts/install.sh — fetched by the VM startup script.
+# Point at your fork's main branch (or a tagged release for stability).
+install_script_url   = "https://raw.githubusercontent.com/USER/exit-node/main/scripts/install.sh"

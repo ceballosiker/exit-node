@@ -159,3 +159,16 @@ func TestResolveGCPCredentialsFallsBackToADC(t *testing.T) {
 		t.Errorf("ADC payload should be empty (resolved later by google sdk)")
 	}
 }
+
+func TestExampleConfigParses(t *testing.T) {
+	cfg, err := Load("../../examples/config.toml")
+	if err != nil {
+		t.Fatalf("Load examples/config.toml: %v", err)
+	}
+	if cfg.GCP.Project == "" || cfg.Tailscale.Tailnet == "" || cfg.PFSense.Host == "" {
+		t.Errorf("example config has empty top-level values: %+v", cfg)
+	}
+	if cfg.Tailscale.EphemeralKeyTTL == 0 {
+		t.Errorf("example config did not parse the duration: %+v", cfg.Tailscale)
+	}
+}

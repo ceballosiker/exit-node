@@ -1,0 +1,64 @@
+version: 2
+
+project_name: exitnode
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: exitnode
+    main: ./cmd/exitnode
+    binary: exitnode
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+  - id: exitnode-mcp
+    main: ./cmd/exitnode-mcp
+    binary: exitnode-mcp
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - README.md
+      - examples/config.toml
+      - examples/mcp.json
+      - scripts/install.sh
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+
+release:
+  github:
+    owner: ceballosiker
+    name: exit-node
+  draft: false
+  prerelease: auto

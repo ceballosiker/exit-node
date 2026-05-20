@@ -84,7 +84,7 @@ func newMockProvider() *mockProvider {
 
 // attachClock wires a shared sequence clock into the mock's recorder so its
 // calls can be merged chronologically with other mocks in the fixture.
-func (m *mockProvider) attachClock(c *clock) { m.recorder.clock = c }
+func (m *mockProvider) attachClock(c *clock) { m.clock = c }
 
 func (m *mockProvider) Provision(ctx context.Context, opts gcp.ProvisionOpts) (*gcp.ExitNode, error) {
 	m.record("Provision", opts.Name, opts.Region, opts.MachineType)
@@ -138,7 +138,7 @@ func newMockTS() *mockTS {
 	}
 }
 
-func (m *mockTS) attachClock(c *clock) { m.recorder.clock = c }
+func (m *mockTS) attachClock(c *clock) { m.clock = c }
 
 func (m *mockTS) MintEphemeralAuthKey(ctx context.Context, tags []string) (string, error) {
 	m.record("MintEphemeralAuthKey", tags)
@@ -186,7 +186,7 @@ func newMockPF() *mockPF {
 	}
 }
 
-func (m *mockPF) attachClock(c *clock) { m.recorder.clock = c }
+func (m *mockPF) attachClock(c *clock) { m.clock = c }
 
 func (m *mockPF) GetGateway(ctx context.Context, name string) (*pfsense.Gateway, error) {
 	m.record("GetGateway", name)
@@ -236,4 +236,4 @@ func (m *mockProbe) EgressDirect(ctx context.Context) (string, error) {
 	return m.EgressDirectResult, m.EgressDirectErr
 }
 
-func (m *mockProbe) attachClock(c *clock) { m.recorder.clock = c }
+func (m *mockProbe) attachClock(c *clock) { m.clock = c }
