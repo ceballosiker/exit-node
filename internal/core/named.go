@@ -29,6 +29,18 @@ func (c *Core) Start(ctx context.Context, name string) error {
 	return c.refreshIfActive(ctx, name)
 }
 
+// Stop stops a running exit-node VM by name. If the name matches the
+// currently-active node, the on-disk state cache is refreshed.
+func (c *Core) Stop(ctx context.Context, name string) error {
+	if name == "" {
+		return ErrNameRequired
+	}
+	if err := c.provider.Stop(ctx, name); err != nil {
+		return fmt.Errorf("provider.Stop %s: %w", name, err)
+	}
+	return c.refreshIfActive(ctx, name)
+}
+
 // refreshIfActive re-fetches the named node from the provider and updates the
 // local state cache — but only when name matches the currently-recorded active
 // node. A provider Get failure is logged and swallowed; Start already succeeded

@@ -104,3 +104,48 @@ func TestStart_RejectsEmptyName(t *testing.T) {
 		t.Errorf("provider.Start was called despite empty name")
 	}
 }
+
+func TestStop_CallsProviderStop(t *testing.T) {
+	f := namedFixture(t, nil)
+
+	if err := f.c.Stop(context.Background(), "vpn-us-central1-abc"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if !hasCallWithArg(f.prov.calls, "Stop", "vpn-us-central1-abc") {
+		t.Errorf("provider.Stop not called with expected name; calls=%v", f.prov.calls)
+	}
+}
+
+func TestStop_RefreshesStateWhenNameMatchesActive(t *testing.T) {
+	active := &gcp.ExitNode{Name: "vpn-us-central1-abc", State: gcp.StateRunning}
+	f := namedFixture(t, active)
+	f.prov.GetResult["vpn-us-central1-abc"] = &gcp.ExitNode{
+		Name: "vpn-us-central1-abc", State: gcp.StateStopped, PublicIP: "",
+	}
+
+	if err := f.c.Stop(context.Background(), "vpn-us-central1-abc"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	got, err := f.store.GetActive()
+	if err != nil {
+		t.Fatalf("GetActive: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetActive returned nil, want refreshed node")
+	}
+	if got.State != gcp.StateStopped {
+		t.Errorf("state not refreshed: got State=%v, want StateStopped", got.State)
+	}
+}
+
+func TestStop_RejectsEmptyName(t *testing.T) {
+	f := namedFixture(t, nil)
+	err := f.c.Stop(context.Background(), "")
+	if !errors.Is(err, ErrNameRequired) {
+		t.Errorf("got %v, want ErrNameRequired", err)
+	}
+	// Provider.Stop must not have been called.
+	if hasCallWithArg(f.prov.calls, "Stop", "") {
+		t.Errorf("provider.Stop was called despite empty name")
+	}
+}
