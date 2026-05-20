@@ -31,11 +31,12 @@ jobs:
         with:
           go-version: '1.25'
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
-          # Must be v2.x — v1 was built with Go 1.24 and refuses to analyze
-          # source targeting go 1.25 (which our go.mod pins).
-          version: v2.x
+          # golangci-lint v1.x was built with Go 1.24 and refuses to analyze
+          # source targeting go 1.25 (which our go.mod pins). Pin a recent
+          # v2.x; the action's @v6/@v7/@v8 don't speak v2 config format.
+          version: v2.12.2
           args: --timeout=5m
 
   build-matrix:

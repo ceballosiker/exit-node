@@ -1,0 +1,29 @@
+version: "2"
+
+# Standard preset = errcheck, govet, ineffassign, staticcheck, unused.
+# Matches what golangci-lint v1 enabled implicitly. Add more linters
+# here only after the standard set is consistently green.
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # Stdout-write errors are not meaningfully recoverable in this CLI;
+      # do not require every fmt.Fprint* / Fprintln / Fprintf call to be
+      # blank-assigned.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+  exclusions:
+    rules:
+      # Test files routinely defer Close() on stores/servers without checking
+      # the error — the goroutine is already torn down and the next test will
+      # surface any real problem.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
