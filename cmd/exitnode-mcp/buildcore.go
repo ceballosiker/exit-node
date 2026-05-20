@@ -101,4 +101,3 @@ func buildCore(ctx context.Context) (*core.Core, func(), error) {
 	})
 	return c, func() { _ = store.Close() }, nil
 }
-

@@ -26,7 +26,7 @@ func downFixture(t *testing.T, active *gcp.ExitNode) *rotateFixture {
 		}
 	}
 	c := New(Deps{
-		Config: &config.Config{},
+		Config:   &config.Config{},
 		Provider: newMockProvider(), TS: newMockTS(),
 		PF: newMockPF(), Probe: &mockProbe{},
 		Store: store, Logger: slog.New(slog.NewTextHandler(testWriter{t}, nil)),

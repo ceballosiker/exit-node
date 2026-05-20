@@ -84,7 +84,12 @@ func New(ctx context.Context, opts Options) (Provider, error) {
 
 	var clientOpts []option.ClientOption
 	if len(opts.CredentialsJSON) > 0 {
-		clientOpts = append(clientOpts, option.WithCredentialsJSON(opts.CredentialsJSON))
+		// SA1019: option.WithCredentialsJSON is marked deprecated because the
+		// upstream auth library cannot validate JSON it receives. Our caller
+		// is the operator (config + env var GCP_CREDENTIALS_JSON), which we
+		// control; the deprecation's threat model doesn't apply. Re-evaluate
+		// when we migrate to cloud.google.com/go/auth.
+		clientOpts = append(clientOpts, option.WithCredentialsJSON(opts.CredentialsJSON)) //nolint:staticcheck
 	}
 
 	inst, err := compute.NewInstancesRESTClient(ctx, clientOpts...)

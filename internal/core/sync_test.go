@@ -26,7 +26,7 @@ func syncFixture(t *testing.T, active *gcp.ExitNode, gwIP string) *rotateFixture
 	pf := newMockPF()
 	pf.Gateways["GW"] = gwIP
 	c := New(Deps{
-		Config: &config.Config{PFSense: config.PFSenseConfig{GatewayName: "GW"}},
+		Config:   &config.Config{PFSense: config.PFSenseConfig{GatewayName: "GW"}},
 		Provider: newMockProvider(), TS: newMockTS(),
 		PF: pf, Probe: &mockProbe{},
 		Store: store, Logger: slog.New(slog.NewTextHandler(testWriter{t}, nil)),

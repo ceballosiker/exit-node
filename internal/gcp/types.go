@@ -69,9 +69,9 @@ type ExitNode struct {
 
 // ProvisionOpts is the input to Provider.Provision.
 type ProvisionOpts struct {
-	Name             string   // generated: vpn-<region>-<zone>-<rand>
+	Name             string // generated: vpn-<region>-<zone>-<rand>
 	Region           string
-	Zone             string   // empty → provider chooses a random zone in Region
+	Zone             string // empty → provider chooses a random zone in Region
 	MachineType      string
 	Hostname         string   // typically == Name
 	TailscaleAuthKey string   // ephemeral, single-use, ~5m TTL

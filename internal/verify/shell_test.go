@@ -57,11 +57,11 @@ func TestEgressVia_HappyPath_RestoresPrior(t *testing.T) {
 	statusJSON := `{"ExitNodeStatus":{"ID":"prior-node-id"}}`
 	fake := &fakeRunner{
 		Responses: []fakeResponse{
-			{Stdout: statusJSON, Err: nil},             // tailscale status --json
-			{Stdout: "", Err: nil},                     // tailscale set --exit-node=<new>
-			{Stdout: "pong\n", Err: nil},               // tailscale ping
-			{Stdout: "203.0.113.7\n", Err: nil},        // curl
-			{Stdout: "", Err: nil},                     // tailscale set --exit-node=prior-node-id (defer)
+			{Stdout: statusJSON, Err: nil},      // tailscale status --json
+			{Stdout: "", Err: nil},              // tailscale set --exit-node=<new>
+			{Stdout: "pong\n", Err: nil},        // tailscale ping
+			{Stdout: "203.0.113.7\n", Err: nil}, // curl
+			{Stdout: "", Err: nil},              // tailscale set --exit-node=prior-node-id (defer)
 		},
 	}
 	p := &shellProbe{run: fake, probeURL: "https://example.com/ip"}
@@ -164,10 +164,10 @@ func TestEgressDirect_HappyPath_RestoresPrior(t *testing.T) {
 	statusJSON := `{"ExitNodeStatus":{"ID":"prior-node-id"}}`
 	fake := &fakeRunner{
 		Responses: []fakeResponse{
-			{Stdout: statusJSON},               // status
-			{Stdout: ""},                       // set --exit-node= (clear)
-			{Stdout: "203.0.113.99\n"},         // curl
-			{Stdout: ""},                       // restore
+			{Stdout: statusJSON},       // status
+			{Stdout: ""},               // set --exit-node= (clear)
+			{Stdout: "203.0.113.99\n"}, // curl
+			{Stdout: ""},               // restore
 		},
 	}
 	p := &shellProbe{run: fake, probeURL: "https://x/ip"}
