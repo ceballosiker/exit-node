@@ -70,11 +70,6 @@ func defaultStatePath() string {
 	return filepath.Join(home, ".config", "exitnode", "state.json")
 }
 
-// Subcommand stubs (real impls in subsequent tasks). Kept visible (not
-// Hidden) so the help-output smoke test in Step 7 passes even before
-// the real impls land.
-func newCostCmd(*rootOpts) *cobra.Command { return &cobra.Command{Use: "cost"} }
-
 // buildCore loads config + secrets, opens the state store, and constructs
 // a *core.Core with real client implementations wired in. Returned cleanup
 // must always be called (releases the state lock).
