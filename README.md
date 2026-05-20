@@ -8,6 +8,10 @@ On-demand Tailscale exit nodes that rotate across cloud regions and keep your
 pfSense gateway in sync. Driven from a CLI for humans and an MCP server for
 AI agents.
 
+> **Personal project.** Built for my own home network. MIT-licensed and
+> forkable, but no guarantees on uptime, breaking changes, or issue response
+> — depend on this at your own risk.
+
 ## Why
 
 VPN exit nodes are useful exactly because they're not always-on:
