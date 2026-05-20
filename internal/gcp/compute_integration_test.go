@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func gateIntegration(t *testing.T) (Options, bool) {
+func gateIntegration(t *testing.T) Options {
 	t.Helper()
 	if os.Getenv("EXITNODE_INTEGRATION") != "1" {
 		t.Skip("EXITNODE_INTEGRATION!=1; skipping real-GCP test")
@@ -26,7 +26,7 @@ func gateIntegration(t *testing.T) (Options, bool) {
 	if jsonKey := os.Getenv("GCP_CREDENTIALS_JSON"); jsonKey != "" {
 		opts.CredentialsJSON = []byte(jsonKey)
 	}
-	return opts, true
+	return opts
 }
 
 func envOr(key, def string) string {
@@ -37,14 +37,18 @@ func envOr(key, def string) string {
 }
 
 func TestIntegration_ListIsCallable(t *testing.T) {
-	opts, _ := gateIntegration(t)
+	opts := gateIntegration(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	p, err := New(ctx, opts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer p.(*gcpProvider).Close()
+	defer func() {
+		if err := p.(*gcpProvider).Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	}()
 
 	// We don't assert content (the test project may have no managed
 	// VMs); just that the call returns without error.
