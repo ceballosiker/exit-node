@@ -37,6 +37,8 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 
+	cmd.Version = fmt.Sprintf("%s (commit %s, %s)", version, commit, date)
+
 	cmd.PersistentFlags().StringVar(&opts.configPath, "config", defaultConfigPath(), "Path to config.toml")
 	cmd.PersistentFlags().BoolVar(&opts.json, "json", false, "Machine-readable JSON output")
 	cmd.PersistentFlags().BoolVarP(&opts.verbose, "verbose", "v", false, "Verbose (debug) logging")
