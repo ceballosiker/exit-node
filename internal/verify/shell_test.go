@@ -1,0 +1,209 @@
+package verify
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+)
+
+// fakeRunner records every command and returns canned outputs / errors
+// per call. Tests configure Responses in order; the i-th Run call
+// returns Responses[i].
+type fakeRunner struct {
+	calls     []fakeCall
+	Responses []fakeResponse
+}
+
+type fakeCall struct {
+	Name string
+	Args []string
+}
+
+type fakeResponse struct {
+	Stdout string
+	Err    error
+}
+
+func (f *fakeRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	i := len(f.calls)
+	f.calls = append(f.calls, fakeCall{Name: name, Args: args})
+	if i >= len(f.Responses) {
+		return "", errors.New("fakeRunner: unexpected extra call")
+	}
+	r := f.Responses[i]
+	return r.Stdout, r.Err
+}
+
+func (f *fakeRunner) lastNCommands(n int) []string {
+	out := make([]string, 0, n)
+	start := len(f.calls) - n
+	if start < 0 {
+		start = 0
+	}
+	for _, c := range f.calls[start:] {
+		out = append(out, c.Name+" "+strings.Join(c.Args, " "))
+	}
+	return out
+}
+
+func TestShellRunnerInterface(t *testing.T) {
+	// Sentinel test — confirms commandRunner is the seam and *fakeRunner
+	// implements it. Compile-only assertion.
+	var _ commandRunner = (*fakeRunner)(nil)
+}
+
+func TestEgressVia_HappyPath_RestoresPrior(t *testing.T) {
+	statusJSON := `{"ExitNodeStatus":{"ID":"prior-node-id"}}`
+	fake := &fakeRunner{
+		Responses: []fakeResponse{
+			{Stdout: statusJSON, Err: nil},      // tailscale status --json
+			{Stdout: "", Err: nil},              // tailscale set --exit-node=<new>
+			{Stdout: "pong\n", Err: nil},        // tailscale ping
+			{Stdout: "203.0.113.7\n", Err: nil}, // curl
+			{Stdout: "", Err: nil},              // tailscale set --exit-node=prior-node-id (defer)
+		},
+	}
+	p := &shellProbe{run: fake, probeURL: "https://example.com/ip"}
+
+	got, err := p.EgressVia(context.Background(), "100.64.0.9")
+	if err != nil {
+		t.Fatalf("EgressVia: %v", err)
+	}
+	if got != "203.0.113.7" {
+		t.Errorf("egress = %q, want 203.0.113.7", got)
+	}
+
+	if len(fake.calls) != 5 {
+		t.Fatalf("expected 5 commands, got %d: %v", len(fake.calls), fake.lastNCommands(len(fake.calls)))
+	}
+	// The fifth call must be the restore to the prior ID.
+	got5 := fake.calls[4]
+	if got5.Name != "tailscale" || !contains(got5.Args, "--exit-node=prior-node-id") {
+		t.Errorf("expected restore to prior id, got %s %v", got5.Name, got5.Args)
+	}
+}
+
+// contains reports whether needle is in haystack.
+func contains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func TestEgressVia_RestoreRunsOnFailure(t *testing.T) {
+	statusJSON := `{"ExitNodeStatus":{"ID":"prior-node-id"}}`
+
+	cases := []struct {
+		name string
+		// Responses: status, set, ping, curl — index of which one to fail.
+		failAt        int
+		wantErrSubstr string
+	}{
+		{name: "set fails", failAt: 1, wantErrSubstr: "set exit-node"},
+		{name: "ping fails", failAt: 2, wantErrSubstr: "tailscale ping"},
+		{name: "curl fails", failAt: 3, wantErrSubstr: "curl probe URL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			responses := []fakeResponse{
+				{Stdout: statusJSON, Err: nil},  // status
+				{Stdout: "", Err: nil},          // set
+				{Stdout: "pong\n", Err: nil},    // ping
+				{Stdout: "1.2.3.4\n", Err: nil}, // curl
+			}
+			responses[tc.failAt] = fakeResponse{Err: errors.New("boom")}
+			// Always one extra response for the restore.
+			responses = append(responses, fakeResponse{})
+
+			fake := &fakeRunner{Responses: responses}
+			p := &shellProbe{run: fake, probeURL: "https://x/ip"}
+
+			_, err := p.EgressVia(context.Background(), "100.64.0.9")
+			if err == nil {
+				t.Fatalf("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+				t.Errorf("err = %q, want substring %q", err.Error(), tc.wantErrSubstr)
+			}
+
+			// The LAST call must be the restore.
+			last := fake.calls[len(fake.calls)-1]
+			if last.Name != "tailscale" || !contains(last.Args, "--exit-node=prior-node-id") {
+				t.Errorf("expected last call to be restore; got %s %v", last.Name, last.Args)
+			}
+		})
+	}
+}
+
+func TestEgressVia_RestoresEmptyWhenNoPriorExitNode(t *testing.T) {
+	// ExitNodeStatus absent in JSON → restore arg is bare "--exit-node="
+	fake := &fakeRunner{
+		Responses: []fakeResponse{
+			{Stdout: `{}`, Err: nil},        // status: no ExitNodeStatus
+			{Stdout: "", Err: nil},          // set
+			{Stdout: "pong\n", Err: nil},    // ping
+			{Stdout: "1.2.3.4\n", Err: nil}, // curl
+			{Stdout: "", Err: nil},          // restore
+		},
+	}
+	p := &shellProbe{run: fake, probeURL: "https://x/ip"}
+	if _, err := p.EgressVia(context.Background(), "100.64.0.9"); err != nil {
+		t.Fatalf("EgressVia: %v", err)
+	}
+	last := fake.calls[len(fake.calls)-1]
+	if last.Name != "tailscale" || !contains(last.Args, "--exit-node=") {
+		t.Errorf("expected restore with empty exit-node, got %s %v", last.Name, last.Args)
+	}
+}
+
+func TestEgressDirect_HappyPath_RestoresPrior(t *testing.T) {
+	statusJSON := `{"ExitNodeStatus":{"ID":"prior-node-id"}}`
+	fake := &fakeRunner{
+		Responses: []fakeResponse{
+			{Stdout: statusJSON},       // status
+			{Stdout: ""},               // set --exit-node= (clear)
+			{Stdout: "203.0.113.99\n"}, // curl
+			{Stdout: ""},               // restore
+		},
+	}
+	p := &shellProbe{run: fake, probeURL: "https://x/ip"}
+	got, err := p.EgressDirect(context.Background())
+	if err != nil {
+		t.Fatalf("EgressDirect: %v", err)
+	}
+	if got != "203.0.113.99" {
+		t.Errorf("egress = %q", got)
+	}
+	// 2nd call clears, 4th call restores.
+	if got, want := fake.calls[1].Args, []string{"set", "--exit-node="}; !equalSlices(got, want) {
+		t.Errorf("clear call = %v, want %v", got, want)
+	}
+	if last := fake.calls[3]; !contains(last.Args, "--exit-node=prior-node-id") {
+		t.Errorf("restore call = %v", last)
+	}
+}
+
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestNewReturnsProbe(t *testing.T) {
+	var _ Probe = (*shellProbe)(nil) // compile-time interface check
+
+	p := New("https://example.com/ip")
+	if p == nil {
+		t.Fatalf("New returned nil")
+	}
+}
