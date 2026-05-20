@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/iker/exit-node/internal/gcp"
 )
@@ -23,7 +24,7 @@ func (c *Core) Start(ctx context.Context, name string) error {
 		return ErrNameRequired
 	}
 	if err := c.provider.Start(ctx, name); err != nil {
-		return err
+		return fmt.Errorf("provider.Start %s: %w", name, err)
 	}
 	return c.refreshIfActive(ctx, name)
 }
